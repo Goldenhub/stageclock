@@ -1,0 +1,54 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Event Timer",
+  "version": "0.1.0",
+  "identifier": "com.event-timer.app",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "label": "control",
+        "url": "control.html",
+        "title": "Event Timer — Control",
+        "width": 1100,
+        "height": 780,
+        "minWidth": 800,
+        "minHeight": 600,
+        "resizable": true,
+        "visible": true,
+        "center": true
+      },
+      {
+        "label": "display",
+        "url": "display.html",
+        "title": "Event Timer — Display",
+        "width": 1280,
+        "height": 720,
+        "decorations": false,
+        "fullscreen": false,
+        "resizable": true,
+        "visible": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  }
+}
