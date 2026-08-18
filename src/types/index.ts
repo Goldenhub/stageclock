@@ -8,12 +8,14 @@ export interface TimerState {
   overtime: boolean;
   allow_overtime: boolean;  // if false and overtime, display "TIME'S UP"
   next_item_label: string | null;
+  banner_text: string | null;
 }
 
 export interface ScheduleItem {
   id: string;
   label: string;
   duration: number;         // seconds
+  direction: "up" | "down";
   notes?: string;
 }
 
@@ -28,12 +30,9 @@ export interface AppSettings {
     warningSeconds: number;  // default 120 — amber
     criticalSeconds: number; // default 30 — red + flash
   };
-  displayFontScale: number;
   showNextItem: boolean;
   autoAdvance: boolean;
   pin: string;
-  brandColor: string;
-  logoText: string;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -41,12 +40,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
     warningSeconds: 120,
     criticalSeconds: 30,
   },
-  displayFontScale: 1.0,
   showNextItem: true,
   autoAdvance: false,
   pin: "1234",
-  brandColor: "#6366f1",
-  logoText: "EVENT TIMER",
 };
 
 export const DEFAULT_TIMER_STATE: TimerState = {
@@ -59,6 +55,7 @@ export const DEFAULT_TIMER_STATE: TimerState = {
   overtime: false,
   allow_overtime: false,
   next_item_label: null,
+  banner_text: null,
 };
 
 export type ColorState = "normal" | "warning" | "critical" | "overtime" | "times_up";

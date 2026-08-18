@@ -7,6 +7,12 @@ pub struct ScheduleItem {
     pub id: String,
     pub label: String,
     pub duration_seconds: u64,
+    #[serde(default = "default_direction")]
+    pub direction: String,
+}
+
+fn default_direction() -> String {
+    "down".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -20,6 +26,7 @@ pub struct TimerState {
     pub overtime: bool,
     pub allow_overtime: bool,
     pub next_item_label: Option<String>,
+    pub banner_text: Option<String>,
 }
 
 impl Default for TimerState {
@@ -34,6 +41,7 @@ impl Default for TimerState {
             overtime: false,
             allow_overtime: false,
             next_item_label: None,
+            banner_text: None,
         }
     }
 }
@@ -48,6 +56,8 @@ pub struct AppState {
     pub label: Option<String>,
     pub allow_overtime: bool,
     pub schedule_items: Vec<ScheduleItem>,
+    pub schedule_name: String,
+    pub banner_text: Option<String>,
 }
 
 impl AppState {
@@ -62,6 +72,8 @@ impl AppState {
             label: None,
             allow_overtime: false,
             schedule_items: Vec::new(),
+            schedule_name: String::new(),
+            banner_text: None,
         }
     }
 
@@ -96,6 +108,7 @@ impl AppState {
             overtime,
             allow_overtime: self.allow_overtime,
             next_item_label: self.next_item_label(),
+            banner_text: self.banner_text.clone(),
         }
     }
 }

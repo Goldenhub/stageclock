@@ -3,6 +3,7 @@ use axum::{
         ws::{Message, WebSocket, WebSocketUpgrade},
         State,
     },
+    http::header,
     response::{Html, IntoResponse},
     routing::get,
     Router,
@@ -15,6 +16,7 @@ use crate::state::SharedState;
 
 // Mobile HTML is embedded at compile time.
 const MOBILE_HTML: &str = include_str!("../../src/mobile/index.html");
+const LOGO_BYTES: &[u8] = include_bytes!("../../src/assets/logo.png");
 
 pub struct ServerState {
     pub timer_state: SharedState,
@@ -33,6 +35,8 @@ struct WsCommand {
     id: Option<String>,
     duration: Option<u64>,
     label: Option<String>,
+    direction: Option<String>,
+    text: Option<String>,
 }
 
 pub async fn start_server(
@@ -48,6 +52,7 @@ pub async fn start_server(
 
     let app = Router::new()
         .route("/mobile", get(mobile_handler))
+        .route("/logo", get(logo_handler))
         .route("/ws", get(ws_handler))
         .with_state(server_state);
 
@@ -68,6 +73,13 @@ pub async fn start_server(
 
 async fn mobile_handler() -> Html<&'static str> {
     Html(MOBILE_HTML)
+}
+
+async fn logo_handler() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "image/png"), (header::CACHE_CONTROL, "public, max-age=86400")],
+        LOGO_BYTES,
+    )
 }
 
 async fn ws_handler(
@@ -103,6 +115,7 @@ async fn handle_socket(mut socket: WebSocket, state: SharedServerState) {
                                                     "id": item.id,
                                                     "label": item.label,
                                                     "duration_seconds": item.duration_seconds,
+                                                    "direction": item.direction,
                                                 })
                                             }).collect();
                                             let active_id = ts.active_item_id.clone();
@@ -116,9 +129,12 @@ async fn handle_socket(mut socket: WebSocket, state: SharedServerState) {
                                                 "overtime": ts.overtime,
                                                 "allow_overtime": ts.allow_overtime,
                                                 "active_item_id": active_id,
+                                                "banner_text": ts.banner_text,
                                             });
+                                            let schedule_name = state_guard.schedule_name.clone();
                                             let schedule_json = serde_json::json!({
                                                 "type": "SCHEDULE",
+                                                "name": schedule_name,
                                                 "items": schedule,
                                                 "active_item_id": active_id,
                                             });
@@ -224,13 +240,16 @@ fn handle_ws_command(cmd: &WsCommand, state: &SharedServerState) {
             if let (Some(id), Some(duration)) = (cmd.id.clone(), cmd.duration) {
                 let duration_ms = duration * 1000;
                 app_state.duration_ms = duration_ms;
-                app_state.direction = "down".to_string();
+                app_state.direction = cmd.direction.clone().unwrap_or_else(|| "down".to_string());
                 app_state.active_item_id = Some(id);
                 app_state.label = cmd.label.clone();
                 app_state.running = false;
                 app_state.start_instant = None;
                 app_state.elapsed_at_snapshot = duration_ms as i64;
             }
+        }
+        "SET_BANNER" => {
+            app_state.banner_text = cmd.text.clone();
         }
         _ => {}
     }

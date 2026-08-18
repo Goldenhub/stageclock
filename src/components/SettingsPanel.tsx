@@ -126,55 +126,6 @@ export function SettingsPanel({ settings, onUpdate }: Props) {
         </div>
       </section>
 
-      {/* Branding */}
-      <section className="flex flex-col gap-3">
-        <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
-          Branding
-        </h3>
-        <div className="flex flex-col gap-1">
-          <label className="text-xs text-gray-500">Brand Color</label>
-          <div className="flex items-center gap-2">
-            <input
-              type="color"
-              value={settings.brandColor}
-              onChange={(e) => set("brandColor", e.target.value)}
-              className="w-10 h-10 rounded cursor-pointer bg-transparent border-0"
-            />
-            <input
-              type="text"
-              value={settings.brandColor}
-              onChange={(e) => set("brandColor", e.target.value)}
-              className={`${input} flex-1`}
-            />
-          </div>
-        </div>
-        <div className="flex flex-col gap-1">
-          <label className="text-xs text-gray-500">Logo / Name</label>
-          <input
-            type="text"
-            value={settings.logoText}
-            onChange={(e) => set("logoText", e.target.value)}
-            placeholder="EVENT TIMER"
-            className={input}
-          />
-        </div>
-        <div className="flex flex-col gap-1">
-          <label className="text-xs text-gray-500">Font Scale</label>
-          <input
-            type="range"
-            min={0.5}
-            max={2}
-            step={0.05}
-            value={settings.displayFontScale}
-            onChange={(e) => set("displayFontScale", Number(e.target.value))}
-            className="w-full"
-          />
-          <span className="text-xs text-gray-500 text-right">
-            {settings.displayFontScale.toFixed(2)}×
-          </span>
-        </div>
-      </section>
-
       {/* Display options */}
       <section className="flex flex-col gap-2">
         <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">

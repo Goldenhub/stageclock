@@ -7,8 +7,8 @@ pub fn advertise(local_ip: &str, port: u16) {
             Ok(mdns) => {
                 let hostname = format!("{}.local.", gethostname());
                 match ServiceInfo::new(
-                    "_event-timer._tcp.local.",
-                    "EventTimer",
+                    "_stageclock._tcp.local.",
+                    "StageClock",
                     &hostname,
                     ip.as_str(),
                     port,
@@ -18,7 +18,7 @@ pub fn advertise(local_ip: &str, port: u16) {
                         if let Err(e) = mdns.register(info) {
                             eprintln!("mDNS register error: {e}");
                         } else {
-                            println!("mDNS: advertising _event-timer._tcp on port {port}");
+                            println!("mDNS: advertising _stageclock._tcp on port {port}");
                             // Keep the daemon alive
                             loop {
                                 std::thread::sleep(std::time::Duration::from_secs(60));

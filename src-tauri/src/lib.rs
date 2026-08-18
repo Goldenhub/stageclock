@@ -90,6 +90,7 @@ async fn load_item(
     item_id: String,
     duration_seconds: u64,
     label: String,
+    direction: Option<String>,
     state: tauri::State<'_, SharedState>,
     app: tauri::AppHandle,
 ) -> Result<(), String> {
@@ -97,7 +98,7 @@ async fn load_item(
         let mut s = state.lock().map_err(|e| e.to_string())?;
         let duration_ms = duration_seconds * 1000;
         s.duration_ms = duration_ms;
-        s.direction = "down".to_string();
+        s.direction = direction.unwrap_or_else(|| "down".to_string());
         s.active_item_id = Some(item_id);
         s.label = Some(label);
         s.running = false;
@@ -177,10 +178,14 @@ async fn set_allow_overtime(
 
 #[tauri::command]
 async fn set_schedule(
+    name: Option<String>,
     items: Vec<ScheduleItem>,
     state: tauri::State<'_, SharedState>,
 ) -> Result<(), String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
+    if let Some(n) = name {
+        s.schedule_name = n;
+    }
     s.schedule_items = items;
     Ok(())
 }
@@ -196,6 +201,22 @@ async fn set_pin(
         *p = pin.clone();
     }
     save_pin(&app, &pin)?;
+    Ok(())
+}
+
+#[tauri::command]
+async fn set_banner(
+    text: Option<String>,
+    state: tauri::State<'_, SharedState>,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    let timer_state = {
+        let mut s = state.lock().map_err(|e| e.to_string())?;
+        s.banner_text = text;
+        s.get_timer_state()
+    };
+    app.emit("timer-state-updated", &timer_state)
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -276,6 +297,7 @@ pub fn run() {
             set_allow_overtime,
             set_schedule,
             set_pin,
+            set_banner,
             get_local_ip,
             get_displays,
             move_display_window_to_monitor,
@@ -315,9 +337,11 @@ pub fn run() {
                                     "id": item.id,
                                     "label": item.label,
                                     "duration_seconds": item.duration_seconds,
+                                    "direction": item.direction,
                                 })
                             }).collect();
                             let active_id = ts.active_item_id.clone();
+                            let schedule_name = state_guard.schedule_name.clone();
                             drop(state_guard);
 
                             let payload = serde_json::json!({
@@ -330,12 +354,14 @@ pub fn run() {
                                 "overtime": ts.overtime,
                                 "allow_overtime": ts.allow_overtime,
                                 "active_item_id": active_id,
+                                "banner_text": ts.banner_text,
                             });
                             if let Ok(json) = serde_json::to_string(&payload) {
                                 let _ = tick_tx.send(json);
                             }
                             let sched_payload = serde_json::json!({
                                 "type": "SCHEDULE",
+                                "name": schedule_name,
                                 "items": schedule,
                                 "active_item_id": active_id,
                             });

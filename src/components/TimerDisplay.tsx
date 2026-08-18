@@ -12,14 +12,13 @@ export function TimerDisplay({ state, settings, large = false }: Props) {
   const colorState: ColorState = getColorState(state, settings);
   const { textClass, flash } = colorStateToStyle(colorState);
 
-  const scale = large ? settings.displayFontScale : 1;
   const fontSize = large
-    ? `${18 * scale}vw`
+    ? "18vw"
     : "clamp(3rem, 8vw, 7rem)";
 
   if (colorState === "times_up") {
     const label = large ? "TIME'S UP" : "TIME'S UP";
-    const textSize = large ? `${7 * scale}vw` : "clamp(2rem, 5vw, 4rem)";
+    const textSize = large ? "7vw" : "clamp(2rem, 5vw, 4rem)";
     return (
       <div className="flex flex-col items-center select-none">
         <div

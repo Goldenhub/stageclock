@@ -34,8 +34,8 @@ export function useTimer() {
   );
 
   const loadItem = useCallback(
-    (itemId: string, durationSeconds: number, label: string) =>
-      invoke("load_item", { itemId, durationSeconds, label }),
+    (itemId: string, durationSeconds: number, label: string, direction?: string) =>
+      invoke("load_item", { itemId, durationSeconds, label, direction: direction ?? "down" }),
     []
   );
 

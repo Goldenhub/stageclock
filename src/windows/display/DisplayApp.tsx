@@ -4,6 +4,7 @@ import type { TimerState, AppSettings } from "../../types";
 import { DEFAULT_TIMER_STATE, DEFAULT_SETTINGS } from "../../types";
 import { TimerDisplay } from "../../components/TimerDisplay";
 import { getColorState } from "../../utils/timerMath";
+import logoUrl from "../../assets/logo.png";
 
 const SETTINGS_KEY = "event-timer-settings";
 
@@ -56,11 +57,11 @@ export function DisplayApp() {
           <h1
             className="text-2xl font-bold tracking-[0.3em] uppercase text-center opacity-20"
             style={{
-              color: settings.brandColor,
+              color: "#6366f1",
               fontSize: "clamp(1rem, 2.5vw, 2rem)",
             }}
           >
-            {settings.logoText}
+            STAGECLOCK
           </h1>
         )}
       </div>
@@ -78,6 +79,27 @@ export function DisplayApp() {
           </p>
         )}
       </div>
+
+      {/* Banner overlay — lower-third */}
+      {state.banner_text && (
+        <div className="absolute bottom-0 left-0 right-0 flex items-center justify-center py-6 px-8"
+             style={{ background: "linear-gradient(transparent, rgba(0,0,0,0.85) 60%)" }}>
+          <div className="bg-black/70 backdrop-blur-sm border border-white/10 rounded-xl px-10 py-4 max-w-[80vw]">
+            <p className="text-white/90 text-center font-medium whitespace-nowrap"
+               style={{ fontSize: "clamp(1rem, 2.5vw, 1.75rem)" }}>
+              {state.banner_text}
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Logo watermark — bottom-right */}
+      <img
+        src={logoUrl}
+        alt=""
+        className="absolute bottom-4 right-5 opacity-15 pointer-events-none"
+        style={{ height: "clamp(24px, 3vw, 48px)" }}
+      />
     </div>
   );
 }

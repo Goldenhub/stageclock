@@ -1,4 +1,4 @@
-# Event Timer
+# StageClock
 
 A lightweight, cross-platform local event management application for controlling and displaying live presentation timers.
 

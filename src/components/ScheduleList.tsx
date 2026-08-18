@@ -1,4 +1,3 @@
-import { useState } from "react";
 import {
   DndContext,
   closestCenter,
@@ -18,7 +17,6 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import type { Schedule, ScheduleItem, TimerState } from "../types";
 import { formatHMS } from "../utils/timeFormat";
-import { ScheduleEditor } from "./ScheduleEditor";
 
 interface ItemRowProps {
   item: ScheduleItem;
@@ -42,48 +40,47 @@ function SortableItem({ item, isActive, onLoad, onEdit, onDelete }: ItemRowProps
     <div
       ref={setNodeRef}
       style={style}
-      className={`flex items-center gap-2 p-3 rounded-lg border transition-colors ${
+      className={`flex items-center gap-1.5 px-2 py-2 rounded-lg border transition-colors group ${
         isActive
           ? "bg-indigo-900/50 border-indigo-500"
-          : "bg-gray-800/60 border-gray-700 hover:border-gray-600"
+          : "bg-gray-800/40 border-gray-700/50 hover:border-gray-600"
       }`}
     >
-      {/* Drag handle */}
       <div
         {...attributes}
         {...listeners}
-        className="cursor-grab active:cursor-grabbing text-gray-600 hover:text-gray-400 px-1 touch-none"
+        className="cursor-grab active:cursor-grabbing text-gray-600 hover:text-gray-400 px-0.5 touch-none text-xs shrink-0"
       >
         ⠿
       </div>
 
-      {/* Load button */}
       <button
         onClick={() => onLoad(item)}
         className="flex-1 text-left min-w-0"
       >
-        <div className={`text-sm font-medium truncate ${isActive ? "text-indigo-200" : "text-white"}`}>
+        <div className={`text-xs font-medium truncate ${isActive ? "text-indigo-200" : "text-gray-200"}`}>
           {item.label}
         </div>
-        {item.notes && (
-          <div className="text-xs text-gray-500 truncate">{item.notes}</div>
-        )}
       </button>
 
-      <span className="text-sm font-mono text-gray-400 shrink-0">
+      <span className="text-[11px] font-mono text-gray-500 shrink-0 tabular-nums">
         {formatHMS(item.duration * 1000)}
+      </span>
+
+      <span className="text-[10px] text-gray-600 shrink-0 w-3 text-center">
+        {item.direction === "up" ? "↑" : "↓"}
       </span>
 
       <button
         onClick={() => onEdit(item)}
-        className="text-gray-500 hover:text-gray-300 px-1 text-xs transition-colors"
+        className="text-gray-600 hover:text-gray-300 px-0.5 text-[10px] transition-colors opacity-0 group-hover:opacity-100 shrink-0"
         title="Edit"
       >
         ✎
       </button>
       <button
         onClick={() => onDelete(item.id)}
-        className="text-gray-600 hover:text-red-400 px-1 text-xs transition-colors"
+        className="text-gray-600 hover:text-red-400 px-0.5 text-[10px] transition-colors opacity-0 group-hover:opacity-100 shrink-0"
         title="Delete"
       >
         ✕
@@ -95,27 +92,26 @@ function SortableItem({ item, isActive, onLoad, onEdit, onDelete }: ItemRowProps
 interface Props {
   schedule: Schedule | null;
   timerState: TimerState;
-  onLoadItem: (itemId: string, durationSeconds: number, label: string) => void;
-  onAddItem: (item: Omit<ScheduleItem, "id">) => void;
-  onUpdateItem: (item: ScheduleItem) => void;
+  onLoadItem: (itemId: string, durationSeconds: number, label: string, direction: string) => void;
+  onEditItem: (item: ScheduleItem) => void;
   onDeleteItem: (id: string) => void;
   onReorder: (items: ScheduleItem[]) => void;
+  onAddClick: () => void;
+  onQuickTimer: () => void;
 }
 
 export function ScheduleList({
   schedule,
   timerState,
   onLoadItem,
-  onAddItem,
-  onUpdateItem,
+  onEditItem,
   onDeleteItem,
   onReorder,
+  onAddClick,
+  onQuickTimer,
 }: Props) {
-  const [editingItem, setEditingItem] = useState<ScheduleItem | null>(null);
-  const [addingNew, setAddingNew] = useState(false);
-
   const sensors = useSensors(
-    useSensor(PointerSensor),
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
     useSensor(KeyboardSensor, {
       coordinateGetter: sortableKeyboardCoordinates,
     })
@@ -123,8 +119,14 @@ export function ScheduleList({
 
   if (!schedule) {
     return (
-      <div className="text-center text-gray-600 py-8 text-sm">
-        No schedule selected.
+      <div className="flex flex-col items-center gap-3 py-8">
+        <p className="text-gray-600 text-xs">No schedule selected.</p>
+        <button
+          onClick={onQuickTimer}
+          className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold rounded-lg transition-colors"
+        >
+          ⚡ Quick Timer
+        </button>
       </div>
     );
   }
@@ -139,11 +141,11 @@ export function ScheduleList({
   }
 
   function handleLoad(item: ScheduleItem) {
-    onLoadItem(item.id, item.duration, item.label);
+    onLoadItem(item.id, item.duration, item.label, item.direction);
   }
 
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex flex-col gap-1">
       <DndContext
         sensors={sensors}
         collisionDetection={closestCenter}
@@ -153,50 +155,25 @@ export function ScheduleList({
           items={schedule.items.map((i) => i.id)}
           strategy={verticalListSortingStrategy}
         >
-          {schedule.items.map((item) => {
-            if (editingItem?.id === item.id) {
-              return (
-                <ScheduleEditor
-                  key={item.id}
-                  item={editingItem}
-                  onSave={(data) => {
-                    onUpdateItem({ ...editingItem, ...data });
-                    setEditingItem(null);
-                  }}
-                  onCancel={() => setEditingItem(null)}
-                />
-              );
-            }
-            return (
-              <SortableItem
-                key={item.id}
-                item={item}
-                isActive={item.id === timerState.active_item_id}
-                onLoad={handleLoad}
-                onEdit={setEditingItem}
-                onDelete={onDeleteItem}
-              />
-            );
-          })}
+          {schedule.items.map((item) => (
+            <SortableItem
+              key={item.id}
+              item={item}
+              isActive={item.id === timerState.active_item_id}
+              onLoad={handleLoad}
+              onEdit={onEditItem}
+              onDelete={onDeleteItem}
+            />
+          ))}
         </SortableContext>
       </DndContext>
 
-      {addingNew ? (
-        <ScheduleEditor
-          onSave={(data) => {
-            onAddItem(data);
-            setAddingNew(false);
-          }}
-          onCancel={() => setAddingNew(false)}
-        />
-      ) : (
-        <button
-          onClick={() => setAddingNew(true)}
-          className="w-full py-3 border border-dashed border-gray-700 rounded-lg text-sm text-gray-500 hover:text-gray-300 hover:border-gray-600 transition-colors"
-        >
-          + Add item
-        </button>
-      )}
+      <button
+        onClick={onAddClick}
+        className="w-full py-2 border border-dashed border-gray-700 rounded-lg text-xs text-gray-500 hover:text-gray-300 hover:border-gray-600 transition-colors mt-1"
+      >
+        + Add Time Slot
+      </button>
     </div>
   );
 }

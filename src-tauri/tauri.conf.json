@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Event Timer",
+  "productName": "StageClock",
   "version": "0.1.0",
-  "identifier": "com.event-timer.app",
+  "identifier": "com.stageclock.desktop",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -15,7 +15,7 @@
       {
         "label": "control",
         "url": "control.html",
-        "title": "Event Timer — Control",
+        "title": "StageClock — Control",
         "width": 1100,
         "height": 780,
         "minWidth": 800,
@@ -27,7 +27,7 @@
       {
         "label": "display",
         "url": "display.html",
-        "title": "Event Timer — Display",
+        "title": "StageClock — Display",
         "width": 1280,
         "height": 720,
         "decorations": false,

@@ -1,12 +1,12 @@
 [package]
-name = "event-timer"
+name = "stageclock"
 version = "0.1.0"
-description = "A Tauri church/event timer application"
+description = "A lightweight cross-platform stage clock and event timer"
 authors = ["you"]
 edition = "2021"
 
 [lib]
-name = "event_timer_lib"
+name = "stageclock_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

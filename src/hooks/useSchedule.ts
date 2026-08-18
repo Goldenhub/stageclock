@@ -7,7 +7,17 @@ const STORAGE_KEY = "event-timer-schedules";
 function loadFromStorage(): Schedule[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return JSON.parse(raw) as Schedule[];
+    if (raw) {
+      const schedules = JSON.parse(raw) as Schedule[];
+      // Backfill direction for old items
+      return schedules.map((s) => ({
+        ...s,
+        items: s.items.map((i) => ({
+          ...i,
+          direction: i.direction ?? ("down" as const),
+        })),
+      }));
+    }
   } catch {
     /* ignore */
   }
@@ -39,10 +49,11 @@ export function useSchedule() {
         id: i.id,
         label: i.label,
         duration_seconds: i.duration,
+        direction: i.direction ?? "down",
       }));
-      invoke("set_schedule", { items }).catch(console.error);
+      invoke("set_schedule", { name: activeSchedule.name, items }).catch(console.error);
     } else {
-      invoke("set_schedule", { items: [] }).catch(console.error);
+      invoke("set_schedule", { name: "", items: [] }).catch(console.error);
     }
   }, [activeSchedule]);
 
@@ -145,6 +156,11 @@ export function useSchedule() {
         const content = await readTextFile(path);
         const schedule = JSON.parse(content) as Schedule;
         schedule.id = crypto.randomUUID();
+        // Backfill direction for imported items
+        schedule.items = schedule.items.map((i) => ({
+          ...i,
+          direction: i.direction ?? ("down" as const),
+        }));
         setSchedules((prev) => [...prev, schedule]);
         setActiveScheduleId(schedule.id);
       }
