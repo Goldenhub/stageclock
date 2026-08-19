@@ -221,7 +221,10 @@ async fn set_banner(
 }
 
 #[tauri::command]
-async fn toggle_display(app: tauri::AppHandle) -> Result<bool, String> {
+async fn toggle_display(
+    app: tauri::AppHandle,
+    monitor_index: Option<usize>,
+) -> Result<bool, String> {
     let display = app
         .get_webview_window("display")
         .ok_or("Display window not found")?;
@@ -229,6 +232,19 @@ async fn toggle_display(app: tauri::AppHandle) -> Result<bool, String> {
         display.hide().map_err(|e| e.to_string())?;
         Ok(false)
     } else {
+        // Move to selected monitor before showing
+        if let Some(idx) = monitor_index {
+            let control = app
+                .get_webview_window("control")
+                .ok_or("Control window not found")?;
+            let monitors = control.available_monitors().map_err(|e| e.to_string())?;
+            if let Some(monitor) = monitors.get(idx) {
+                let pos = monitor.position();
+                display
+                    .set_position(tauri::PhysicalPosition::new(pos.x, pos.y))
+                    .map_err(|e| e.to_string())?;
+            }
+        }
         display.show().map_err(|e| e.to_string())?;
         display.set_focus().map_err(|e| e.to_string())?;
         Ok(true)
@@ -261,7 +277,6 @@ async fn move_display_window_to_monitor(
         display
             .set_position(tauri::PhysicalPosition::new(pos.x, pos.y))
             .map_err(|e| e.to_string())?;
-        display.set_fullscreen(true).map_err(|e| e.to_string())?;
     }
     Ok(())
 }

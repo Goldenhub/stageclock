@@ -33,6 +33,7 @@ export interface AppSettings {
   showNextItem: boolean;
   autoAdvance: boolean;
   pin: string;
+  secondaryMonitorIndex: number;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -43,6 +44,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   showNextItem: true,
   autoAdvance: false,
   pin: "1234",
+  secondaryMonitorIndex: 1,
 };
 
 export const DEFAULT_TIMER_STATE: TimerState = {

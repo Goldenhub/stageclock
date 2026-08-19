@@ -85,24 +85,30 @@ export function SettingsPanel({ settings, onUpdate }: Props) {
           <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
             Display Monitor
           </h3>
-          {displays.map((d) => (
-            <button
-              key={d.index}
-              onClick={() =>
-                invoke("move_display_window_to_monitor", {
-                  monitorIndex: d.index,
-                })
-              }
-              className="text-left px-3 py-2 bg-gray-800 hover:bg-gray-700 rounded-md border border-gray-700 transition-colors"
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs text-gray-500">Primary (Control)</label>
+            <div className="w-full bg-gray-900 border border-gray-700 rounded-md text-xs text-gray-400 px-2 py-1.5">
+              Monitor 1 — {displays[0]?.name} ({displays[0]?.width}×{displays[0]?.height})
+            </div>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs text-gray-500">Secondary (Display)</label>
+            <select
+              value={settings.secondaryMonitorIndex ?? 1}
+              onChange={(e) => {
+                const idx = Number(e.target.value);
+                onUpdate({ ...settings, secondaryMonitorIndex: idx });
+                invoke("move_display_window_to_monitor", { monitorIndex: idx }).catch(console.error);
+              }}
+              className="w-full bg-gray-800 border border-gray-700 rounded-md text-xs text-gray-300 px-2 py-1.5"
             >
-              <span className="font-medium text-gray-200">
-                Monitor {d.index + 1}
-              </span>
-              <span className="text-gray-500 ml-2 text-xs">
-                {d.name} — {d.width}×{d.height}
-              </span>
-            </button>
-          ))}
+              {displays.map((d) => (
+                <option key={d.index} value={d.index}>
+                  Monitor {d.index + 1} — {d.name} ({d.width}×{d.height})
+                </option>
+              ))}
+            </select>
+          </div>
         </section>
       )}
 
