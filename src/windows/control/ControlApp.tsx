@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { useTimer } from "../../hooks/useTimer";
 import { useSchedule } from "../../hooks/useSchedule";
 import { TimerDisplay } from "../../components/TimerDisplay";
@@ -35,6 +36,7 @@ export function ControlApp() {
   const [standaloneMode, setStandaloneMode] = useState(false);
   const [newScheduleName, setNewScheduleName] = useState("");
   const [creatingSchedule, setCreatingSchedule] = useState(false);
+  const [live, setLive] = useState(false);
 
   useEffect(() => {
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
@@ -103,6 +105,10 @@ export function ControlApp() {
     setStandaloneMode(false);
   }
 
+  function handleToggleLive() {
+    invoke<boolean>("toggle_display").then(setLive).catch(console.error);
+  }
+
   const tabBtn = (t: Tab) =>
     `px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
       tab === t
@@ -126,6 +132,18 @@ export function ControlApp() {
               {t.charAt(0).toUpperCase() + t.slice(1)}
             </button>
           ))}
+        </div>
+        <div className="ml-auto">
+          <button
+            onClick={handleToggleLive}
+            className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors ${
+              live
+                ? "bg-red-600 hover:bg-red-500 text-white"
+                : "bg-green-600 hover:bg-green-500 text-white"
+            }`}
+          >
+            {live ? "■ End Live" : "▶ Go Live"}
+          </button>
         </div>
       </header>
 

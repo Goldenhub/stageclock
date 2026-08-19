@@ -221,6 +221,29 @@ async fn set_banner(
 }
 
 #[tauri::command]
+async fn toggle_display(app: tauri::AppHandle) -> Result<bool, String> {
+    let display = app
+        .get_webview_window("display")
+        .ok_or("Display window not found")?;
+    if display.is_visible().map_err(|e| e.to_string())? {
+        display.hide().map_err(|e| e.to_string())?;
+        Ok(false)
+    } else {
+        display.show().map_err(|e| e.to_string())?;
+        display.set_focus().map_err(|e| e.to_string())?;
+        Ok(true)
+    }
+}
+
+#[tauri::command]
+async fn is_display_visible(app: tauri::AppHandle) -> Result<bool, String> {
+    let display = app
+        .get_webview_window("display")
+        .ok_or("Display window not found")?;
+    display.is_visible().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 async fn move_display_window_to_monitor(
     monitor_index: usize,
     app: tauri::AppHandle,
@@ -298,6 +321,8 @@ pub fn run() {
             set_schedule,
             set_pin,
             set_banner,
+            toggle_display,
+            is_display_visible,
             get_local_ip,
             get_displays,
             move_display_window_to_monitor,
@@ -376,37 +401,6 @@ pub fn run() {
             // ── axum server ───────────────────────────────────────────────────
             tauri::async_runtime::spawn(async move {
                 server::start_server(server_state, server_tx, server_pin).await;
-            });
-
-            // ── Auto-move display to a different monitor on startup ──────────
-            let ah = app.handle().clone();
-            tauri::async_runtime::spawn(async move {
-                tokio::time::sleep(Duration::from_millis(800)).await;
-                if let Some(control) = ah.get_webview_window("control") {
-                    if let (Ok(monitors), Ok(current)) =
-                        (control.available_monitors(), control.current_monitor())
-                    {
-                        if monitors.len() > 1 {
-                            if let Some(display) = ah.get_webview_window("display") {
-                                let current_pos = current.map(|m| {
-                                    let p = m.position();
-                                    (p.x, p.y)
-                                });
-                                let target = monitors.iter().find(|m| {
-                                    let pos = m.position();
-                                    current_pos.map_or(true, |(cx, cy)| pos.x != cx || pos.y != cy)
-                                });
-                                if let Some(monitor) = target {
-                                    let pos = monitor.position();
-                                    let _ = display.set_position(
-                                        tauri::PhysicalPosition::new(pos.x, pos.y),
-                                    );
-                                    let _ = display.set_fullscreen(true);
-                                }
-                            }
-                        }
-                    }
-                }
             });
 
             // ── mDNS advertisement ────────────────────────────────────────────

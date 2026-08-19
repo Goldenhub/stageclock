@@ -1,5 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { TimerState, AppSettings } from "../../types";
 import { DEFAULT_TIMER_STATE, DEFAULT_SETTINGS } from "../../types";
 import { TimerDisplay } from "../../components/TimerDisplay";
@@ -39,10 +40,24 @@ export function DisplayApp() {
       ? "#030712"
       : "#0a0101";
 
+  const handleDrag = useCallback(async (e: React.MouseEvent) => {
+    if (e.clientY <= 48) {
+      if (e.detail === 2) {
+        const win = getCurrentWindow();
+        const isFull = await win.isFullscreen();
+        await win.setFullscreen(!isFull);
+      } else {
+        e.preventDefault();
+        getCurrentWindow().startDragging();
+      }
+    }
+  }, []);
+
   return (
     <div
       className="flex flex-col h-screen w-screen select-none overflow-hidden transition-colors duration-500"
       style={{ background: bgColor }}
+      onMouseDown={handleDrag}
     >
       {/* Top: current item label */}
       <div className="flex-1 flex items-end justify-center pb-6 px-8">

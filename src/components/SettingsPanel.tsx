@@ -61,6 +61,21 @@ export function SettingsPanel({ settings, onUpdate }: Props) {
           <p className="text-xs text-gray-500 text-center">
             Scan to open remote control on any phone
           </p>
+          <div className="flex flex-col gap-1">
+            <label className="text-xs text-gray-500">Remote PIN</label>
+            <input
+              type="text"
+              maxLength={8}
+              value={settings.pin}
+              onChange={(e) => {
+                const val = e.target.value.replace(/\D/g, "").slice(0, 8);
+                set("pin", val);
+                invoke("set_pin", { pin: val }).catch(console.error);
+              }}
+              placeholder="1234"
+              className={input}
+            />
+          </div>
         </section>
       )}
 
@@ -152,26 +167,6 @@ export function SettingsPanel({ settings, onUpdate }: Props) {
       </section>
 
       {/* PIN */}
-      <section className="flex flex-col gap-2">
-        <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
-          Security
-        </h3>
-        <div className="flex flex-col gap-1">
-          <label className="text-xs text-gray-500">Phone Remote PIN</label>
-          <input
-            type="text"
-            maxLength={8}
-            value={settings.pin}
-            onChange={(e) => {
-              const val = e.target.value.replace(/\D/g, "").slice(0, 8);
-              set("pin", val);
-              invoke("set_pin", { pin: val }).catch(console.error);
-            }}
-            placeholder="1234"
-            className={input}
-          />
-        </div>
-      </section>
     </div>
   );
 }
