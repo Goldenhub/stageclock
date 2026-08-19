@@ -378,19 +378,31 @@ pub fn run() {
                 server::start_server(server_state, server_tx, server_pin).await;
             });
 
-            // ── Auto-move display to second monitor on startup ────────────────
+            // ── Auto-move display to a different monitor on startup ──────────
             let ah = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 tokio::time::sleep(Duration::from_millis(800)).await;
                 if let Some(control) = ah.get_webview_window("control") {
-                    if let Ok(monitors) = control.available_monitors() {
+                    if let (Ok(monitors), Ok(current)) =
+                        (control.available_monitors(), control.current_monitor())
+                    {
                         if monitors.len() > 1 {
                             if let Some(display) = ah.get_webview_window("display") {
-                                let pos = monitors[1].position();
-                                let _ = display.set_position(
-                                    tauri::PhysicalPosition::new(pos.x, pos.y),
-                                );
-                                let _ = display.set_fullscreen(true);
+                                let current_pos = current.map(|m| {
+                                    let p = m.position();
+                                    (p.x, p.y)
+                                });
+                                let target = monitors.iter().find(|m| {
+                                    let pos = m.position();
+                                    current_pos.map_or(true, |(cx, cy)| pos.x != cx || pos.y != cy)
+                                });
+                                if let Some(monitor) = target {
+                                    let pos = monitor.position();
+                                    let _ = display.set_position(
+                                        tauri::PhysicalPosition::new(pos.x, pos.y),
+                                    );
+                                    let _ = display.set_fullscreen(true);
+                                }
                             }
                         }
                     }
