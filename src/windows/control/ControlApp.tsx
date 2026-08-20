@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useEffect, useState, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useTimer } from "../../hooks/useTimer";
 import { useSchedule } from "../../hooks/useSchedule";
@@ -8,6 +8,7 @@ import { ScheduleList } from "../../components/ScheduleList";
 import { SettingsPanel } from "../../components/SettingsPanel";
 import { AddTimeSlotDialog } from "../../components/AddTimeSlotDialog";
 import { HomePage } from "../../components/HomePage";
+import { checkForUpdates } from "../../updater";
 import type { AppSettings, ScheduleItem } from "../../types";
 import { DEFAULT_SETTINGS } from "../../types";
 
@@ -42,6 +43,11 @@ export function ControlApp() {
   useEffect(() => {
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
   }, [settings]);
+
+  // Check for updates on startup
+  useEffect(() => {
+    checkForUpdates();
+  }, []);
 
   // Always keep display window on the secondary monitor
   useEffect(() => {
