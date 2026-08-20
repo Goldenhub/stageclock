@@ -232,7 +232,6 @@ async fn toggle_display(
         display.hide().map_err(|e| e.to_string())?;
         Ok(false)
     } else {
-        // Move to selected monitor before showing
         if let Some(idx) = monitor_index {
             let control = app
                 .get_webview_window("control")
@@ -240,9 +239,16 @@ async fn toggle_display(
             let monitors = control.available_monitors().map_err(|e| e.to_string())?;
             if let Some(monitor) = monitors.get(idx) {
                 let pos = monitor.position();
+                let size = monitor.size();
+                // Position and size to fill the monitor, then show
                 display
                     .set_position(tauri::PhysicalPosition::new(pos.x, pos.y))
                     .map_err(|e| e.to_string())?;
+                display
+                    .set_size(tauri::PhysicalSize::new(size.width, size.height))
+                    .map_err(|e| e.to_string())?;
+                display.show().map_err(|e| e.to_string())?;
+                return Ok(true);
             }
         }
         display.show().map_err(|e| e.to_string())?;
