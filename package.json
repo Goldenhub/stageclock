@@ -9,10 +9,10 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:build": "tauri build",
-    "release": "npm run build && git tag v$npm_package_version && git push origin v$npm_package_version",
-    "release:patch": "npm version patch --no-git-tag-version && npm run release",
-    "release:minor": "npm version minor --no-git-tag-version && npm run release",
-    "release:major": "npm version major --no-git-tag-version && npm run release"
+    "release": "node scripts/release.mjs patch",
+    "release:patch": "node scripts/release.mjs patch",
+    "release:minor": "node scripts/release.mjs minor",
+    "release:major": "node scripts/release.mjs major"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.1.0",
