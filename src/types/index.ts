@@ -9,6 +9,8 @@ export interface TimerState {
   allow_overtime: boolean;  // if false and overtime, display "TIME'S UP"
   next_item_label: string | null;
   banner_text: string | null;
+  warning_seconds: number;  // alert thresholds, mirrored from settings
+  critical_seconds: number;
 }
 
 export interface ScheduleItem {
@@ -58,6 +60,8 @@ export const DEFAULT_TIMER_STATE: TimerState = {
   allow_overtime: false,
   next_item_label: null,
   banner_text: null,
+  warning_seconds: 120,
+  critical_seconds: 30,
 };
 
 export type ColorState = "normal" | "warning" | "critical" | "overtime" | "times_up";

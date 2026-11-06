@@ -3,9 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { TimerState, AppSettings } from "../../types";
 import { DEFAULT_TIMER_STATE, DEFAULT_SETTINGS } from "../../types";
-import { TimerDisplay } from "../../components/TimerDisplay";
-import { getColorState } from "../../utils/timerMath";
-import logoUrl from "../../assets/logo.png";
+import { StageView } from "../../components/StageView";
 
 const SETTINGS_KEY = "event-timer-settings";
 
@@ -21,100 +19,37 @@ function loadSettings(): AppSettings {
 
 export function DisplayApp() {
   const [state, setState] = useState<TimerState>(DEFAULT_TIMER_STATE);
-  const [settings] = useState<AppSettings>(loadSettings);
+  const [settings, setSettings] = useState<AppSettings>(loadSettings);
 
   useEffect(() => {
-    const unlisten = listen<TimerState>("timer-state-updated", (event) => {
+    const unlistenState = listen<TimerState>("timer-state-updated", (event) => {
       setState(event.payload);
     });
+    // The control window broadcasts settings whenever they change.
+    const unlistenSettings = listen<AppSettings>("settings-updated", (event) => {
+      setSettings({ ...DEFAULT_SETTINGS, ...event.payload });
+    });
     return () => {
-      unlisten.then((fn) => fn());
+      unlistenState.then((fn) => fn());
+      unlistenSettings.then((fn) => fn());
     };
   }, []);
 
-  const colorState = getColorState(state, settings);
-  const bgColor =
-    colorState === "normal"
-      ? "#030712"
-      : colorState === "warning"
-      ? "#030712"
-      : "#0a0101";
-
-  const handleDrag = useCallback(async (e: React.MouseEvent) => {
-    if (e.clientY <= 48) {
-      if (e.detail === 2) {
-        const win = getCurrentWindow();
-        const isFull = await win.isFullscreen();
-        await win.setFullscreen(!isFull);
-      } else {
-        e.preventDefault();
-        getCurrentWindow().startDragging();
-      }
+  // Drag the frameless window from its top strip; double-click toggles fullscreen.
+  const handleMouseDown = useCallback(async (e: React.MouseEvent) => {
+    if (e.clientY > 48) return;
+    if (e.detail === 2) {
+      const win = getCurrentWindow();
+      await win.setFullscreen(!(await win.isFullscreen()));
+    } else {
+      e.preventDefault();
+      getCurrentWindow().startDragging();
     }
   }, []);
 
   return (
-    <div
-      className="flex flex-col h-screen w-screen select-none overflow-hidden transition-colors duration-500"
-      style={{ background: bgColor }}
-      onMouseDown={handleDrag}
-    >
-      {/* Top: current item label */}
-      <div className="flex-1 flex items-end justify-center pb-6 px-8">
-        {state.label ? (
-          <h1
-            className="text-2xl font-semibold tracking-wide text-center text-white/80"
-            style={{ fontSize: "clamp(1.25rem, 3vw, 2.5rem)" }}
-          >
-            {state.label}
-          </h1>
-        ) : (
-          <h1
-            className="text-2xl font-bold tracking-[0.3em] uppercase text-center opacity-20"
-            style={{
-              color: "#6366f1",
-              fontSize: "clamp(1rem, 2.5vw, 2rem)",
-            }}
-          >
-            STAGECLOCK
-          </h1>
-        )}
-      </div>
-
-      {/* Center: clock */}
-      <div className="flex items-center justify-center py-4">
-        <TimerDisplay state={state} settings={settings} large />
-      </div>
-
-      {/* Bottom: next item */}
-      <div className="flex-1 flex items-start justify-center pt-6 px-8">
-        {state.next_item_label && state.label && settings.showNextItem && (
-          <p className="text-white/30 text-sm uppercase tracking-widest">
-            Next: {state.next_item_label}
-          </p>
-        )}
-      </div>
-
-      {/* Banner overlay — lower-third */}
-      {state.banner_text && (
-        <div className="absolute bottom-0 left-0 right-0 flex items-center justify-center py-6 px-8"
-             style={{ background: "linear-gradient(transparent, rgba(0,0,0,0.85) 60%)" }}>
-          <div className="bg-black/70 backdrop-blur-sm border border-white/10 rounded-xl px-10 py-4 max-w-[80vw]">
-            <p className="text-white/90 text-center font-medium whitespace-nowrap"
-               style={{ fontSize: "clamp(1rem, 2.5vw, 1.75rem)" }}>
-              {state.banner_text}
-            </p>
-          </div>
-        </div>
-      )}
-
-      {/* Logo watermark — bottom-right */}
-      <img
-        src={logoUrl}
-        alt=""
-        className="absolute bottom-4 right-5 opacity-15 pointer-events-none"
-        style={{ height: "clamp(24px, 3vw, 48px)" }}
-      />
+    <div className="h-screen w-screen cursor-default" onMouseDown={handleMouseDown}>
+      <StageView state={state} settings={settings} />
     </div>
   );
 }

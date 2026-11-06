@@ -4,22 +4,51 @@
 
 :root {
   --brand-color: #6366f1;
+  color-scheme: dark;
 }
 
 * {
   box-sizing: border-box;
 }
 
+html,
 body {
   margin: 0;
   padding: 0;
-  background: #030712;
-  color: white;
-  font-family: system-ui, -apple-system, sans-serif;
+  height: 100%;
+  background: #09090b;
+  color: #fafafa;
+  font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
 
 #root {
-  min-height: 100vh;
-  min-height: 100dvh;
+  height: 100vh;
+  height: 100dvh;
+}
+
+/* Clock digits: heavy system face with fixed-width numerals so the clock
+   doesn't wobble as digits change. */
+.stage-digits,
+.clock-digits {
+  font-family: system-ui, -apple-system, "SF Pro Display", "Segoe UI", Roboto, sans-serif;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+  letter-spacing: -0.02em;
+}
+
+/* Thin, unobtrusive scrollbars in the operator UI */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: #27272a;
+  border-radius: 8px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #3f3f46;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
 }

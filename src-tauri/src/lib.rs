@@ -12,77 +12,55 @@ use state::{AppState, ScheduleItem, SharedState, TimerState};
 
 // ─── Tauri commands ──────────────────────────────────────────────────────────
 
+/// Sender used to push state to connected phones.
+pub struct WsBroadcast(pub broadcast::Sender<String>);
+
+/// The port the phone remote server is listening on, if it started.
+pub struct RemotePort(pub Option<u16>);
+
+/// Apply a change to the timer state, then push the result to every window
+/// and every connected phone immediately.
+fn mutate(
+    app: &tauri::AppHandle,
+    state: &SharedState,
+    tx: &WsBroadcast,
+    f: impl FnOnce(&mut AppState),
+) -> Result<(), String> {
+    let timer_state = {
+        let mut s = state::lock(state);
+        f(&mut s);
+        server::broadcast_state(&s, &tx.0);
+        s.get_timer_state()
+    };
+    app.emit("timer-state-updated", &timer_state)
+        .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 async fn timer_command(
     action: String,
     state: tauri::State<'_, SharedState>,
+    tx: tauri::State<'_, WsBroadcast>,
     app: tauri::AppHandle,
 ) -> Result<(), String> {
-    let timer_state = {
-        let mut s = state.lock().map_err(|e| e.to_string())?;
-        match action.as_str() {
-            "start" => {
-                if !s.running {
-                    s.elapsed_at_snapshot = s.current_elapsed_ms();
-                    s.start_instant = Some(std::time::Instant::now());
-                    s.running = true;
-                }
-            }
-            "pause" => {
-                if s.running {
-                    s.elapsed_at_snapshot = s.current_elapsed_ms();
-                    s.start_instant = None;
-                    s.running = false;
-                }
-            }
-            "stop" => {
-                s.elapsed_at_snapshot = if s.direction == "down" {
-                    s.duration_ms as i64
-                } else {
-                    0
-                };
-                s.start_instant = None;
-                s.running = false;
-            }
-            "reset" => {
-                let reset_val = if s.direction == "down" {
-                    s.duration_ms as i64
-                } else {
-                    0
-                };
-                s.elapsed_at_snapshot = reset_val;
-                if s.running {
-                    s.start_instant = Some(std::time::Instant::now());
-                }
-            }
-            _ => return Err(format!("Unknown action: {action}")),
-        }
-        s.get_timer_state()
+    let apply: fn(&mut AppState) = match action.as_str() {
+        "start" => AppState::start,
+        "pause" => AppState::pause,
+        "stop" => AppState::stop,
+        "reset" => AppState::reset,
+        _ => return Err(format!("Unknown action: {action}")),
     };
-    app.emit("timer-state-updated", &timer_state)
-        .map_err(|e| e.to_string())?;
-    Ok(())
+    mutate(&app, &state, &tx, apply)
 }
 
 #[tauri::command]
 async fn adjust_timer(
     delta_seconds: i64,
     state: tauri::State<'_, SharedState>,
+    tx: tauri::State<'_, WsBroadcast>,
     app: tauri::AppHandle,
 ) -> Result<(), String> {
-    let timer_state = {
-        let mut s = state.lock().map_err(|e| e.to_string())?;
-        let current = s.current_elapsed_ms();
-        let new_val = (current + delta_seconds * 1000).max(0);
-        s.elapsed_at_snapshot = new_val;
-        if s.running {
-            s.start_instant = Some(std::time::Instant::now());
-        }
-        s.get_timer_state()
-    };
-    app.emit("timer-state-updated", &timer_state)
-        .map_err(|e| e.to_string())?;
-    Ok(())
+    mutate(&app, &state, &tx, |s| s.adjust(delta_seconds))
 }
 
 #[tauri::command]
@@ -92,31 +70,39 @@ async fn load_item(
     label: String,
     direction: Option<String>,
     state: tauri::State<'_, SharedState>,
+    tx: tauri::State<'_, WsBroadcast>,
     app: tauri::AppHandle,
 ) -> Result<(), String> {
-    let timer_state = {
-        let mut s = state.lock().map_err(|e| e.to_string())?;
-        let duration_ms = duration_seconds * 1000;
-        s.duration_ms = duration_ms;
-        s.direction = direction.unwrap_or_else(|| "down".to_string());
-        s.active_item_id = Some(item_id);
-        s.label = Some(label);
-        s.running = false;
-        s.start_instant = None;
-        s.elapsed_at_snapshot = duration_ms as i64;
-        s.get_timer_state()
-    };
-    app.emit("timer-state-updated", &timer_state)
-        .map_err(|e| e.to_string())?;
-    Ok(())
+    mutate(&app, &state, &tx, |s| {
+        s.load_item(item_id, duration_seconds, Some(label), direction)
+    })
+}
+
+#[tauri::command]
+async fn update_active_item(
+    item_id: String,
+    label: String,
+    duration_seconds: u64,
+    direction: Option<String>,
+    state: tauri::State<'_, SharedState>,
+    tx: tauri::State<'_, WsBroadcast>,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    mutate(&app, &state, &tx, |s| {
+        s.update_active_item(&item_id, label, duration_seconds, direction)
+    })
 }
 
 #[tauri::command]
 async fn get_timer_state(
     state: tauri::State<'_, SharedState>,
 ) -> Result<TimerState, String> {
-    let s = state.lock().map_err(|e| e.to_string())?;
-    Ok(s.get_timer_state())
+    Ok(state::lock(&state).get_timer_state())
+}
+
+#[tauri::command]
+async fn get_remote_port(port: tauri::State<'_, RemotePort>) -> Result<Option<u16>, String> {
+    Ok(port.0)
 }
 
 #[tauri::command]
@@ -164,16 +150,10 @@ async fn get_displays(app: tauri::AppHandle) -> Result<Vec<DisplayInfo>, String>
 async fn set_allow_overtime(
     allow: bool,
     state: tauri::State<'_, SharedState>,
+    tx: tauri::State<'_, WsBroadcast>,
     app: tauri::AppHandle,
 ) -> Result<(), String> {
-    let timer_state = {
-        let mut s = state.lock().map_err(|e| e.to_string())?;
-        s.allow_overtime = allow;
-        s.get_timer_state()
-    };
-    app.emit("timer-state-updated", &timer_state)
-        .map_err(|e| e.to_string())?;
-    Ok(())
+    mutate(&app, &state, &tx, |s| s.allow_overtime = allow)
 }
 
 #[tauri::command]
@@ -181,13 +161,29 @@ async fn set_schedule(
     name: Option<String>,
     items: Vec<ScheduleItem>,
     state: tauri::State<'_, SharedState>,
+    tx: tauri::State<'_, WsBroadcast>,
+    app: tauri::AppHandle,
 ) -> Result<(), String> {
-    let mut s = state.lock().map_err(|e| e.to_string())?;
-    if let Some(n) = name {
-        s.schedule_name = n;
-    }
-    s.schedule_items = items;
-    Ok(())
+    mutate(&app, &state, &tx, |s| {
+        if let Some(n) = name {
+            s.schedule_name = n;
+        }
+        s.schedule_items = items;
+    })
+}
+
+#[tauri::command]
+async fn set_alert_thresholds(
+    warning_seconds: u64,
+    critical_seconds: u64,
+    state: tauri::State<'_, SharedState>,
+    tx: tauri::State<'_, WsBroadcast>,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    mutate(&app, &state, &tx, |s| {
+        s.warning_seconds = warning_seconds;
+        s.critical_seconds = critical_seconds;
+    })
 }
 
 #[tauri::command]
@@ -207,17 +203,12 @@ async fn set_pin(
 #[tauri::command]
 async fn set_banner(
     text: Option<String>,
+    duration_seconds: Option<u64>,
     state: tauri::State<'_, SharedState>,
+    tx: tauri::State<'_, WsBroadcast>,
     app: tauri::AppHandle,
 ) -> Result<(), String> {
-    let timer_state = {
-        let mut s = state.lock().map_err(|e| e.to_string())?;
-        s.banner_text = text;
-        s.get_timer_state()
-    };
-    app.emit("timer-state-updated", &timer_state)
-        .map_err(|e| e.to_string())?;
-    Ok(())
+    mutate(&app, &state, &tx, |s| s.set_banner(text, duration_seconds))
 }
 
 #[tauri::command]
@@ -324,9 +315,12 @@ pub fn run() {
     let shared_state: SharedState = Arc::new(std::sync::Mutex::new(AppState::new()));
     let (ws_broadcast_tx, _) = broadcast::channel::<String>(64);
 
-    // Clones for setup closure
-    let server_state = shared_state.clone();
-    let server_tx = ws_broadcast_tx.clone();
+    // Bind the phone remote port up front so the UI can show the real one.
+    let listener = server::bind_listener();
+    let remote_port = listener
+        .as_ref()
+        .and_then(|l| l.local_addr().ok())
+        .map(|a| a.port());
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -334,19 +328,24 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
-        .manage(shared_state)
+        .manage(shared_state.clone())
+        .manage(WsBroadcast(ws_broadcast_tx.clone()))
+        .manage(RemotePort(remote_port))
         .invoke_handler(tauri::generate_handler![
             timer_command,
             adjust_timer,
             load_item,
+            update_active_item,
             get_timer_state,
             set_allow_overtime,
             set_schedule,
+            set_alert_thresholds,
             set_pin,
             set_banner,
             toggle_display,
             is_display_visible,
             get_local_ip,
+            get_remote_port,
             get_displays,
             move_display_window_to_monitor,
         ])
@@ -358,77 +357,49 @@ pub fn run() {
             let pin = Arc::new(tokio::sync::Mutex::new(initial_pin));
             app.manage(pin.clone());
 
-            let server_pin = pin.clone();
-
-            let tick_state = app.state::<SharedState>().inner().clone();
+            let tick_state = shared_state.clone();
             let tick_tx = ws_broadcast_tx.clone();
 
-            // ── Tick loop: 100ms Tauri events + 1s WebSocket broadcast ────────
+            // ── Tick loop: 100ms window updates, 1s phone resync ─────────────
+            // Changes are pushed immediately by the commands; this loop keeps
+            // the windows' clocks moving and expires timed banners.
             tauri::async_runtime::spawn(async move {
                 let mut tauri_tick = tokio::time::interval(Duration::from_millis(100));
                 let mut ws_tick = tokio::time::interval(Duration::from_secs(1));
-                // Don't let missed ticks pile up
                 tauri_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
                 ws_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
                 loop {
                     tokio::select! {
                         _ = tauri_tick.tick() => {
-                            let ts = tick_state.lock().unwrap().get_timer_state();
+                            let ts = {
+                                let mut s = state::lock(&tick_state);
+                                if s.expire_banner() {
+                                    server::broadcast_state(&s, &tick_tx);
+                                }
+                                s.get_timer_state()
+                            };
                             let _ = app_handle.emit("timer-state-updated", &ts);
                         }
                         _ = ws_tick.tick() => {
-                            let state_guard = tick_state.lock().unwrap();
-                            let ts = state_guard.get_timer_state();
-                            let schedule: Vec<_> = state_guard.schedule_items.iter().map(|item| {
-                                serde_json::json!({
-                                    "id": item.id,
-                                    "label": item.label,
-                                    "duration_seconds": item.duration_seconds,
-                                    "direction": item.direction,
-                                })
-                            }).collect();
-                            let active_id = ts.active_item_id.clone();
-                            let schedule_name = state_guard.schedule_name.clone();
-                            drop(state_guard);
-
-                            let payload = serde_json::json!({
-                                "type": "STATE",
-                                "elapsed_ms": ts.elapsed_ms,
-                                "duration_ms": ts.duration_ms,
-                                "running": ts.running,
-                                "direction": ts.direction,
-                                "label": ts.label,
-                                "overtime": ts.overtime,
-                                "allow_overtime": ts.allow_overtime,
-                                "active_item_id": active_id,
-                                "banner_text": ts.banner_text,
-                            });
-                            if let Ok(json) = serde_json::to_string(&payload) {
-                                let _ = tick_tx.send(json);
-                            }
-                            let sched_payload = serde_json::json!({
-                                "type": "SCHEDULE",
-                                "name": schedule_name,
-                                "items": schedule,
-                                "active_item_id": active_id,
-                            });
-                            if let Ok(json) = serde_json::to_string(&sched_payload) {
-                                let _ = tick_tx.send(json);
-                            }
+                            let s = state::lock(&tick_state);
+                            server::broadcast_state(&s, &tick_tx);
                         }
                     }
                 }
             });
 
-            // ── axum server ───────────────────────────────────────────────────
-            tauri::async_runtime::spawn(async move {
-                server::start_server(server_state, server_tx, server_pin).await;
-            });
+            // ── Phone remote server + mDNS ────────────────────────────────────
+            if let (Some(listener), Some(port)) = (listener, remote_port) {
+                let server_state = shared_state.clone();
+                let server_tx = ws_broadcast_tx.clone();
+                tauri::async_runtime::spawn(async move {
+                    server::start_server(listener, server_state, server_tx, pin).await;
+                });
 
-            // ── mDNS advertisement ────────────────────────────────────────────
-            if let Ok(ip) = local_ip_address::local_ip() {
-                mdns::advertise(&ip.to_string(), 3000);
+                if let Ok(ip) = local_ip_address::local_ip() {
+                    mdns::advertise(&ip.to_string(), port);
+                }
             }
 
             Ok(())

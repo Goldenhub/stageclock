@@ -16,21 +16,3 @@ export function getColorState(
   }
   return "normal";
 }
-
-export function colorStateToStyle(colorState: ColorState): {
-  textClass: string;
-  flash: boolean;
-} {
-  switch (colorState) {
-    case "warning":
-      return { textClass: "text-amber-400", flash: false };
-    case "critical":
-      return { textClass: "text-red-500", flash: true };
-    case "overtime":
-      return { textClass: "text-red-500", flash: true };
-    case "times_up":
-      return { textClass: "text-red-500", flash: false }; // text itself animates
-    default:
-      return { textClass: "text-white", flash: false };
-  }
-}

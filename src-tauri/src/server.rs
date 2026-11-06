@@ -12,11 +12,14 @@ use serde::Deserialize;
 use std::sync::Arc;
 use tokio::sync::broadcast;
 
-use crate::state::SharedState;
+use crate::state::{self, AppState, SharedState};
 
 // Mobile HTML is embedded at compile time.
 const MOBILE_HTML: &str = include_str!("../../src/mobile/index.html");
 const LOGO_BYTES: &[u8] = include_bytes!("../../src/assets/logo.png");
+
+/// Ports tried in order for the phone remote server.
+pub const PORT_CANDIDATES: std::ops::RangeInclusive<u16> = 3000..=3010;
 
 pub struct ServerState {
     pub timer_state: SharedState,
@@ -39,7 +42,70 @@ struct WsCommand {
     text: Option<String>,
 }
 
+/// Build the STATE and SCHEDULE messages sent to phones.
+pub fn state_messages(s: &AppState) -> [String; 2] {
+    let ts = s.get_timer_state();
+    let schedule: Vec<_> = s
+        .schedule_items
+        .iter()
+        .map(|item| {
+            serde_json::json!({
+                "id": item.id,
+                "label": item.label,
+                "duration_seconds": item.duration_seconds,
+                "direction": item.direction,
+            })
+        })
+        .collect();
+    let state_json = serde_json::json!({
+        "type": "STATE",
+        "elapsed_ms": ts.elapsed_ms,
+        "duration_ms": ts.duration_ms,
+        "running": ts.running,
+        "direction": ts.direction,
+        "label": ts.label,
+        "overtime": ts.overtime,
+        "allow_overtime": ts.allow_overtime,
+        "active_item_id": ts.active_item_id,
+        "banner_text": ts.banner_text,
+        "warning_seconds": ts.warning_seconds,
+        "critical_seconds": ts.critical_seconds,
+    });
+    let schedule_json = serde_json::json!({
+        "type": "SCHEDULE",
+        "name": s.schedule_name,
+        "items": schedule,
+        "active_item_id": ts.active_item_id,
+    });
+    [state_json.to_string(), schedule_json.to_string()]
+}
+
+/// Push the current state to every connected phone right away.
+pub fn broadcast_state(s: &AppState, tx: &broadcast::Sender<String>) {
+    for msg in state_messages(s) {
+        let _ = tx.send(msg);
+    }
+}
+
+/// Bind the first free port from `PORT_CANDIDATES`. Done synchronously at
+/// startup so the UI can report the real port (or that none was free).
+pub fn bind_listener() -> Option<std::net::TcpListener> {
+    for port in PORT_CANDIDATES {
+        match std::net::TcpListener::bind(("0.0.0.0", port)) {
+            Ok(l) => {
+                if l.set_nonblocking(true).is_ok() {
+                    return Some(l);
+                }
+            }
+            Err(e) => eprintln!("Port {port} unavailable: {e}"),
+        }
+    }
+    eprintln!("Phone remote disabled: no free port in {PORT_CANDIDATES:?}");
+    None
+}
+
 pub async fn start_server(
+    listener: std::net::TcpListener,
     timer_state: SharedState,
     broadcast_tx: broadcast::Sender<String>,
     pin: Arc<tokio::sync::Mutex<String>>,
@@ -56,15 +122,17 @@ pub async fn start_server(
         .route("/ws", get(ws_handler))
         .with_state(server_state);
 
-    let listener = match tokio::net::TcpListener::bind("0.0.0.0:3000").await {
+    let listener = match tokio::net::TcpListener::from_std(listener) {
         Ok(l) => l,
         Err(e) => {
-            eprintln!("Failed to bind server on port 3000: {e}");
+            eprintln!("Failed to start phone remote server: {e}");
             return;
         }
     };
 
-    println!("Remote server listening on http://0.0.0.0:3000");
+    if let Ok(addr) = listener.local_addr() {
+        println!("Remote server listening on http://{addr}");
+    }
 
     if let Err(e) = axum::serve(listener, app).await {
         eprintln!("Server error: {e}");
@@ -105,50 +173,15 @@ async fn handle_socket(mut socket: WebSocket, state: SharedServerState) {
                                     if cmd.pin.as_deref() == Some(&correct_pin) {
                                         authenticated = true;
                                         let resp = serde_json::json!({"type": "AUTH_OK"}).to_string();
-                                        let _ = socket.send(Message::Text(resp.into())).await;
-                                        // Extract state data, then drop the guard before awaits
-                                        let (state_json, schedule_json) = {
-                                            let state_guard = state.timer_state.lock().unwrap();
-                                            let ts = state_guard.get_timer_state();
-                                            let schedule: Vec<_> = state_guard.schedule_items.iter().map(|item| {
-                                                serde_json::json!({
-                                                    "id": item.id,
-                                                    "label": item.label,
-                                                    "duration_seconds": item.duration_seconds,
-                                                    "direction": item.direction,
-                                                })
-                                            }).collect();
-                                            let active_id = ts.active_item_id.clone();
-                                            let state_json = serde_json::json!({
-                                                "type": "STATE",
-                                                "elapsed_ms": ts.elapsed_ms,
-                                                "duration_ms": ts.duration_ms,
-                                                "running": ts.running,
-                                                "direction": ts.direction,
-                                                "label": ts.label,
-                                                "overtime": ts.overtime,
-                                                "allow_overtime": ts.allow_overtime,
-                                                "active_item_id": active_id,
-                                                "banner_text": ts.banner_text,
-                                            });
-                                            let schedule_name = state_guard.schedule_name.clone();
-                                            let schedule_json = serde_json::json!({
-                                                "type": "SCHEDULE",
-                                                "name": schedule_name,
-                                                "items": schedule,
-                                                "active_item_id": active_id,
-                                            });
-                                            (state_json, schedule_json)
-                                        };
-                                        if let Ok(json) = serde_json::to_string(&state_json) {
-                                            let _ = socket.send(Message::Text(json.into())).await;
-                                        }
-                                        if let Ok(json) = serde_json::to_string(&schedule_json) {
-                                            let _ = socket.send(Message::Text(json.into())).await;
+                                        let _ = socket.send(Message::Text(resp)).await;
+                                        // Build messages, then drop the guard before awaiting.
+                                        let msgs = state_messages(&state::lock(&state.timer_state));
+                                        for json in msgs {
+                                            let _ = socket.send(Message::Text(json)).await;
                                         }
                                     } else {
                                         let resp = serde_json::json!({"type": "AUTH_FAIL"}).to_string();
-                                        let _ = socket.send(Message::Text(resp.into())).await;
+                                        let _ = socket.send(Message::Text(resp)).await;
                                     }
                                 }
                                 _ if authenticated => {
@@ -165,10 +198,8 @@ async fn handle_socket(mut socket: WebSocket, state: SharedServerState) {
             broadcast = rx.recv() => {
                 match broadcast {
                     Ok(msg) => {
-                        if authenticated {
-                            if socket.send(Message::Text(msg.into())).await.is_err() {
-                                break;
-                            }
+                        if authenticated && socket.send(Message::Text(msg)).await.is_err() {
+                            break;
                         }
                     }
                     Err(broadcast::error::RecvError::Lagged(_)) => continue,
@@ -179,78 +210,35 @@ async fn handle_socket(mut socket: WebSocket, state: SharedServerState) {
     }
 }
 
+/// How long a banner sent from the phone stays up before the server clears it.
+const PHONE_BANNER_SECONDS: u64 = 30;
+
 fn handle_ws_command(cmd: &WsCommand, state: &SharedServerState) {
-    let mut app_state = match state.timer_state.lock() {
-        Ok(s) => s,
-        Err(_) => return,
-    };
+    let mut s = state::lock(&state.timer_state);
 
     match cmd.cmd_type.as_str() {
-        "START" => {
-            if !app_state.running {
-                app_state.start_instant = Some(std::time::Instant::now());
-                app_state.running = true;
-            }
-        }
-        "PAUSE" => {
-            if app_state.running {
-                app_state.elapsed_at_snapshot = app_state.current_elapsed_ms();
-                app_state.start_instant = None;
-                app_state.running = false;
-            }
-        }
-        "STOP" => {
-            let reset_val = if app_state.direction == "down" {
-                app_state.duration_ms as i64
-            } else {
-                0
-            };
-            app_state.elapsed_at_snapshot = reset_val;
-            app_state.start_instant = None;
-            app_state.running = false;
-        }
-        "RESET" => {
-            let reset_val = if app_state.direction == "down" {
-                app_state.duration_ms as i64
-            } else {
-                0
-            };
-            app_state.elapsed_at_snapshot = reset_val;
-            if app_state.running {
-                app_state.start_instant = Some(std::time::Instant::now());
-            } else {
-                app_state.start_instant = None;
-            }
-        }
+        "START" => s.start(),
+        "PAUSE" => s.pause(),
+        "STOP" => s.stop(),
+        "RESET" => s.reset(),
         "ADJUST" => {
             if let Some(delta) = cmd.delta {
-                let current = app_state.current_elapsed_ms();
-                let new_val = if app_state.direction == "down" {
-                    (current + delta * 1000).max(0)
-                } else {
-                    (current + delta * 1000).max(0)
-                };
-                app_state.elapsed_at_snapshot = new_val;
-                if app_state.running {
-                    app_state.start_instant = Some(std::time::Instant::now());
-                }
+                s.adjust(delta);
             }
         }
         "LOAD_ITEM" => {
             if let (Some(id), Some(duration)) = (cmd.id.clone(), cmd.duration) {
-                let duration_ms = duration * 1000;
-                app_state.duration_ms = duration_ms;
-                app_state.direction = cmd.direction.clone().unwrap_or_else(|| "down".to_string());
-                app_state.active_item_id = Some(id);
-                app_state.label = cmd.label.clone();
-                app_state.running = false;
-                app_state.start_instant = None;
-                app_state.elapsed_at_snapshot = duration_ms as i64;
+                s.load_item(id, duration, cmd.label.clone(), cmd.direction.clone());
             }
         }
         "SET_BANNER" => {
-            app_state.banner_text = cmd.text.clone();
+            // The server owns the timeout so a locked phone can't leave a
+            // banner stuck on the stage display.
+            let duration = cmd.duration.unwrap_or(PHONE_BANNER_SECONDS);
+            s.set_banner(cmd.text.clone(), Some(duration));
         }
-        _ => {}
+        _ => return,
     }
+
+    broadcast_state(&s, &state.broadcast_tx);
 }

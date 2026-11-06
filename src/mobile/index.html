@@ -5,7 +5,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
-  <meta name="theme-color" content="#030712" />
+  <meta name="theme-color" content="#09090b" />
   <title>StageClock Remote</title>
   <style>
     *,
@@ -17,15 +17,15 @@
     }
 
     :root {
-      --bg: #030712;
-      --surface: #111827;
-      --border: #1f2937;
-      --text: #f9fafb;
-      --muted: #6b7280;
-      --green: #16a34a;
-      --amber: #d97706;
-      --red: #dc2626;
-      --indigo: #4f46e5;
+      --bg: #09090b;
+      --surface: #18181b;
+      --border: #27272a;
+      --text: #fafafa;
+      --muted: #71717a;
+      --green: #059669;
+      --amber: #fbbf24;
+      --red: #ef4444;
+      --indigo: #6366f1;
       --btn-h: 68px;
     }
 
@@ -165,8 +165,10 @@
     }
 
     #timer-clock {
-      font-family: 'Courier New', monospace;
-      font-size: 18vw;
+      font-family: system-ui, -apple-system, "SF Pro Display", "Segoe UI", Roboto, sans-serif;
+      font-variant-numeric: tabular-nums;
+      font-feature-settings: "tnum" 1;
+      font-size: 24vw;
       font-weight: 700;
       line-height: 1;
       letter-spacing: -0.02em;
@@ -223,6 +225,14 @@
       grid-template-columns: 1fr 1fr;
     }
 
+    .btn-row.cols-1 {
+      grid-template-columns: 1fr;
+    }
+
+    .btn-row.cols-3 {
+      grid-template-columns: 1fr 1fr 1fr;
+    }
+
     .cols-4 {
       grid-template-columns: 1fr 1fr 1fr 1fr;
     }
@@ -258,8 +268,13 @@
     }
 
     .ctrl-gray {
-      background: #374151;
+      background: #27272a;
       color: var(--text);
+      border: 1px solid #3f3f46;
+    }
+
+    .ctrl.ctrl-plus {
+      color: #6ee7b7;
     }
 
     .ctrl-dark {
@@ -456,12 +471,12 @@
 
     <div id="timer-section">
       <div id="item-label"></div>
-      <div id="timer-clock">00:00:00</div>
+      <div id="timer-clock">00:00</div>
       <div id="timer-status">Stopped</div>
     </div>
 
     <div id="controls">
-      <div class="btn-row cols-2">
+      <div class="btn-row cols-1">
         <button class="ctrl ctrl-green" id="btn-start">&#9654; Start</button>
         <button class="ctrl ctrl-amber" id="btn-pause" style="display:none">&#9646;&#9646; Pause</button>
       </div>
@@ -469,34 +484,32 @@
         <button class="ctrl ctrl-gray" id="btn-stop">&#9632; Stop</button>
         <button class="ctrl ctrl-gray" id="btn-reset">&#8635; Reset</button>
       </div>
-      <div class="btn-row cols-4">
-        <button class="ctrl ctrl-dark" id="btn-m15">&#8722;15m</button>
-        <button class="ctrl ctrl-dark" id="btn-m10">&#8722;10m</button>
-        <button class="ctrl ctrl-dark" id="btn-m5">&#8722;5m</button>
-        <button class="ctrl ctrl-dark" id="btn-m1">&#8722;1m</button>
+      <div class="btn-row cols-3">
+        <button class="ctrl ctrl-dark" id="btn-m10">&#8722;10 min</button>
+        <button class="ctrl ctrl-dark" id="btn-m5">&#8722;5 min</button>
+        <button class="ctrl ctrl-dark" id="btn-m1">&#8722;1 min</button>
       </div>
-      <div class="btn-row cols-4">
-        <button class="ctrl ctrl-dark" id="btn-p1">+1m</button>
-        <button class="ctrl ctrl-dark" id="btn-p5">+5m</button>
-        <button class="ctrl ctrl-dark" id="btn-p10">+10m</button>
-        <button class="ctrl ctrl-dark" id="btn-p15">+15m</button>
+      <div class="btn-row cols-3">
+        <button class="ctrl ctrl-dark ctrl-plus" id="btn-p1">+1 min</button>
+        <button class="ctrl ctrl-dark ctrl-plus" id="btn-p5">+5 min</button>
+        <button class="ctrl ctrl-dark ctrl-plus" id="btn-p10">+10 min</button>
       </div>
       <div id="schedule-section">
         <h3 id="schedule-heading">Schedule — tap to load</h3>
         <div id="schedule-items"></div>
       </div>
       <div id="banner-section">
-        <h3>Banner</h3>
+        <h3>Message to speaker</h3>
         <div id="banner-presets">
-          <button class="banner-preset" data-text="Speaker Ready">Speaker Ready</button>
-          <button class="banner-preset" data-text="5 Min Warning">5 Min Warning</button>
-          <button class="banner-preset" data-text="Wrap It Up">Wrap It Up</button>
+          <button class="banner-preset" data-text="Speaker ready">Speaker ready</button>
+          <button class="banner-preset" data-text="5 minutes left">5 minutes left</button>
+          <button class="banner-preset" data-text="Wrap it up">Wrap it up</button>
         </div>
         <div id="banner-row">
-          <input id="banner-input" type="text" placeholder="Custom banner text…" autocomplete="off" />
+          <input id="banner-input" type="text" placeholder="Type a message…" autocomplete="off" />
           <button id="banner-send">Send</button>
         </div>
-        <button id="banner-clear">Clear Banner</button>
+        <button id="banner-clear">Clear message</button>
       </div>
     </div>
   </div>
@@ -523,17 +536,17 @@
         $('conn-label').textContent = label;
       }
 
-      function fmtMs(ms) {
-        var abs = Math.abs(ms);
-        var totalSec = Math.floor(abs / 1000);
+      // Countdowns round up so the clock reaches 00:00 exactly when time runs out.
+      function fmtMs(ms, roundUp) {
+        var abs = Math.abs(ms) / 1000;
+        var totalSec = roundUp ? Math.ceil(abs) : Math.floor(abs);
         var h = Math.floor(totalSec / 3600);
         var m = Math.floor((totalSec % 3600) / 60);
         var s = totalSec % 60;
         var sign = ms < 0 ? '+' : '';
-        return sign +
-          String(h).padStart(2, '0') + ':' +
-          String(m).padStart(2, '0') + ':' +
-          String(s).padStart(2, '0');
+        var ss = String(s).padStart(2, '0');
+        if (h > 0) return sign + h + ':' + String(m).padStart(2, '0') + ':' + ss;
+        return sign + String(m).padStart(2, '0') + ':' + ss;
       }
 
       function fmtSec(sec) {
@@ -577,7 +590,8 @@
 
       // ── WebSocket ──────────────────────────────────────────────────────────────
       function connect(pin) {
-        var url = 'ws://' + window.location.hostname + ':3000/ws';
+        // Use the page's own host:port — the server may not be on 3000.
+        var url = 'ws://' + window.location.host + '/ws';
         try { ws = new WebSocket(url); } catch (e) { scheduleReconnect(pin); return; }
 
         ws.onopen = function () {
@@ -627,25 +641,58 @@
       }
 
       // ── Display update ─────────────────────────────────────────────────────────
-      function updateDisplay(state) {
+      // The server sends state when something changes (and once a second).
+      // Between messages the clock is advanced locally so it ticks smoothly.
+      var lastState = null;
+      var lastStateAt = 0;
+
+      function currentElapsed() {
+        if (!lastState) return 0;
+        if (!lastState.running) return lastState.elapsed_ms;
+        var dt = performance.now() - lastStateAt;
+        return lastState.direction === 'down'
+          ? lastState.elapsed_ms - dt
+          : lastState.elapsed_ms + dt;
+      }
+
+      function renderClock() {
+        if (!lastState) return;
+        var state = lastState;
         var clock = $('timer-clock');
-        var isOver = state.overtime || state.elapsed_ms < 0;
+        var elapsed = currentElapsed();
+        var isDown = state.direction === 'down';
+        var isOver = isDown && elapsed < 0;
 
         if (isOver && !state.allow_overtime) {
           clock.textContent = "TIME'S UP";
           clock.className = 'critical';
         } else if (isOver) {
-          clock.textContent = fmtMs(state.elapsed_ms);
+          clock.textContent = fmtMs(elapsed, false);
           clock.className = 'overtime';
         } else {
-          clock.textContent = fmtMs(state.elapsed_ms);
+          clock.textContent = fmtMs(elapsed, isDown && elapsed > 0);
           clock.className = '';
-          if (state.direction === 'down') {
-            var rem = state.elapsed_ms / 1000;
-            if (rem <= 30) clock.classList.add('critical');
-            else if (rem <= 120) clock.classList.add('warning');
+          if (isDown && state.duration_ms > 0) {
+            var rem = elapsed / 1000;
+            var critical = state.critical_seconds != null ? state.critical_seconds : 30;
+            var warning = state.warning_seconds != null ? state.warning_seconds : 120;
+            if (rem <= critical) clock.classList.add('critical');
+            else if (rem <= warning) clock.classList.add('warning');
           }
         }
+      }
+
+      setInterval(renderClock, 100);
+
+      function updateDisplay(state) {
+        lastState = state;
+        lastStateAt = performance.now();
+        renderClock();
+
+        // Reflect the banner that is actually on the stage.
+        document.querySelectorAll('.banner-preset').forEach(function (b) {
+          b.classList.toggle('active-preset', !!state.banner_text && b.getAttribute('data-text') === state.banner_text);
+        });
 
         $('item-label').textContent = state.label || '';
         $('timer-status').textContent =
@@ -671,6 +718,11 @@
             '<span class="sched-dur">' + fmtSec(item.duration_seconds || 0) + '</span>';
           el.addEventListener('click', function () {
             haptic(el);
+            // Loading replaces what's on stage — confirm if a timer is running.
+            if (lastState && lastState.running &&
+                !window.confirm('"' + (lastState.label || 'The current timer') + '" is running.\n\nReplace it with "' + item.label + '"?')) {
+              return;
+            }
             send({ type: 'LOAD_ITEM', id: item.id, duration: item.duration_seconds, label: item.label, direction: item.direction || 'down' });
           });
           container.appendChild(el);
@@ -682,14 +734,12 @@
       $('btn-pause').addEventListener('click', function () { haptic(this); send({ type: 'PAUSE' }); });
       $('btn-stop').addEventListener('click', function () { haptic(this); send({ type: 'STOP' }); });
       $('btn-reset').addEventListener('click', function () { haptic(this); send({ type: 'RESET' }); });
-      $('btn-m15').addEventListener('click', function () { haptic(this); send({ type: 'ADJUST', delta: -900 }); });
       $('btn-m10').addEventListener('click', function () { haptic(this); send({ type: 'ADJUST', delta: -600 }); });
       $('btn-m5').addEventListener('click', function () { haptic(this); send({ type: 'ADJUST', delta: -300 }); });
       $('btn-m1').addEventListener('click', function () { haptic(this); send({ type: 'ADJUST', delta: -60 }); });
       $('btn-p1').addEventListener('click', function () { haptic(this); send({ type: 'ADJUST', delta: 60 }); });
       $('btn-p5').addEventListener('click', function () { haptic(this); send({ type: 'ADJUST', delta: 300 }); });
       $('btn-p10').addEventListener('click', function () { haptic(this); send({ type: 'ADJUST', delta: 600 }); });
-      $('btn-p15').addEventListener('click', function () { haptic(this); send({ type: 'ADJUST', delta: 900 }); });
 
       // ── Auto-connect if PIN saved ─────────────────────────────────────────────
       var savedPin = sessionStorage.getItem(PIN_KEY);
@@ -700,10 +750,12 @@
       }
 
       // ── Banner ────────────────────────────────────────────────────────────────
-      var bannerTimer = null;
+      // The server clears banners after BANNER_SECONDS, so a phone that locks
+      // or loses Wi-Fi can't leave a banner stuck on the stage.
+      var BANNER_SECONDS = 30;
 
       function setBanner(text) {
-        send({ type: 'SET_BANNER', text: text || null });
+        send({ type: 'SET_BANNER', text: text || null, duration: BANNER_SECONDS });
       }
 
       document.querySelectorAll('.banner-preset').forEach(function (btn) {
@@ -711,51 +763,33 @@
           haptic(btn);
           var text = btn.getAttribute('data-text');
           var isActive = btn.classList.contains('active-preset');
-          document.querySelectorAll('.banner-preset').forEach(function (b) { b.classList.remove('active-preset'); });
-          if (isActive) {
-            setBanner(null);
-            clearTimeout(bannerTimer);
-          } else {
-            btn.classList.add('active-preset');
-            setBanner(text);
-            $('banner-input').value = '';
-            clearTimeout(bannerTimer);
-            bannerTimer = setTimeout(function () {
-              setBanner(null);
-              document.querySelectorAll('.banner-preset').forEach(function (b) { b.classList.remove('active-preset'); });
-            }, 30000);
-          }
+          setBanner(isActive ? null : text);
+          if (!isActive) $('banner-input').value = '';
         });
       });
 
-      $('banner-send').addEventListener('click', function () {
-        haptic(this);
+      function sendCustomBanner() {
         var text = $('banner-input').value.trim();
         if (!text) return;
-        document.querySelectorAll('.banner-preset').forEach(function (b) { b.classList.remove('active-preset'); });
         setBanner(text);
-        clearTimeout(bannerTimer);
-        bannerTimer = setTimeout(function () { setBanner(null); }, 30000);
+      }
+
+      $('banner-send').addEventListener('click', function () {
+        haptic(this);
+        sendCustomBanner();
       });
 
       $('banner-input').addEventListener('keydown', function (e) {
         if (e.key === 'Enter') {
           haptic($('banner-send'));
-          var text = $('banner-input').value.trim();
-          if (!text) return;
-          document.querySelectorAll('.banner-preset').forEach(function (b) { b.classList.remove('active-preset'); });
-          setBanner(text);
-          clearTimeout(bannerTimer);
-          bannerTimer = setTimeout(function () { setBanner(null); }, 30000);
+          sendCustomBanner();
         }
       });
 
       $('banner-clear').addEventListener('click', function () {
         haptic(this);
-        document.querySelectorAll('.banner-preset').forEach(function (b) { b.classList.remove('active-preset'); });
         setBanner(null);
         $('banner-input').value = '';
-        clearTimeout(bannerTimer);
       });
     })();
   </script>

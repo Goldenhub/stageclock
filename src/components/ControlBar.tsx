@@ -1,58 +1,86 @@
+import { Play, Pause, Square, RotateCcw } from "lucide-react";
 import type { TimerState } from "../types";
+import { Button, Kbd, Segmented } from "./ui";
 
 interface Props {
   state: TimerState;
+  disabled?: boolean;
   onStart: () => void;
   onPause: () => void;
   onStop: () => void;
   onReset: () => void;
-  onAdjust: (delta: number) => void;
+  onAdjust: (deltaSeconds: number) => void;
+  onAllowOvertime: (allow: boolean) => void;
 }
 
-const btn = "px-4 py-3 rounded-lg font-semibold text-sm uppercase tracking-wide transition-all active:scale-95 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-950";
+const ADJUSTMENTS = [-600, -300, -60, 60, 300, 600];
 
-export function ControlBar({ state, onStart, onPause, onStop, onReset, onAdjust }: Props) {
+export function ControlBar({
+  state,
+  disabled,
+  onStart,
+  onPause,
+  onStop,
+  onReset,
+  onAdjust,
+  onAllowOvertime,
+}: Props) {
   return (
     <div className="flex flex-col gap-3">
-      {/* Primary controls */}
-      <div className="flex gap-2 justify-center">
-        {!state.running ? (
-          <button onClick={onStart} className={`${btn} bg-green-600 hover:bg-green-500 text-white focus:ring-green-500 flex-1`}>
-            ▶ Start
-          </button>
+      {/* Transport */}
+      <div className="flex gap-2">
+        {state.running ? (
+          <Button variant="warning" size="lg" className="flex-1" onClick={onPause} disabled={disabled}>
+            <Pause size={20} fill="currentColor" /> Pause
+            <span className="ml-1 opacity-60"><Kbd>Space</Kbd></span>
+          </Button>
         ) : (
-          <button onClick={onPause} className={`${btn} bg-amber-500 hover:bg-amber-400 text-black focus:ring-amber-400 flex-1`}>
-            ⏸ Pause
-          </button>
+          <Button variant="success" size="lg" className="flex-1" onClick={onStart} disabled={disabled}>
+            <Play size={20} fill="currentColor" /> Start
+            <span className="ml-1 opacity-70"><Kbd>Space</Kbd></span>
+          </Button>
         )}
-        <button onClick={onStop} className={`${btn} bg-gray-700 hover:bg-gray-600 text-white focus:ring-gray-500`}>
-          ⏹ Stop
-        </button>
-        <button onClick={onReset} className={`${btn} bg-gray-700 hover:bg-gray-600 text-white focus:ring-gray-500`}>
-          ↺ Reset
-        </button>
+        <Button size="lg" onClick={onReset} disabled={disabled} title="Reset to the full time (keeps running if running)">
+          <RotateCcw size={18} /> Reset
+        </Button>
+        <Button size="lg" onClick={onStop} disabled={disabled} title="Stop and reset">
+          <Square size={16} fill="currentColor" /> Stop
+        </Button>
       </div>
 
-      {/* Adjust controls */}
-      <div className="flex flex-col gap-1.5">
-        <div className="flex gap-1.5 justify-center">
-          {[-900, -600, -300, -60].map((delta) => {
-            const abs = Math.abs(delta);
-            return (
-              <button key={delta} onClick={() => onAdjust(delta)} className={`${btn} bg-gray-800 hover:bg-gray-700 text-gray-200 border border-gray-700 text-xs`}>
-                −{abs / 60}m
-              </button>
-            );
-          })}
-        </div>
-        <div className="flex gap-1.5 justify-center">
-          {[60, 300, 600, 900].map((delta) => (
-            <button key={delta} onClick={() => onAdjust(delta)} className={`${btn} bg-gray-800 hover:bg-gray-700 text-gray-200 border border-gray-700 text-xs`}>
-              +{delta / 60}m
-            </button>
-          ))}
-        </div>
+      {/* Add / remove time */}
+      <div className="flex items-center gap-1.5">
+        {ADJUSTMENTS.map((delta) => (
+          <Button
+            key={delta}
+            size="sm"
+            className={`flex-1 tabular-nums ${delta > 0 ? "text-emerald-300" : "text-zinc-300"}`}
+            onClick={() => onAdjust(delta)}
+            disabled={disabled}
+          >
+            {delta > 0 ? "+" : "−"}
+            {Math.abs(delta) / 60} min
+          </Button>
+        ))}
       </div>
+
+      {/* What happens at zero */}
+      {state.direction === "down" && (
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-xs text-zinc-500">When time runs out, show</span>
+          <div className="w-64">
+            <Segmented
+              size="sm"
+              value={state.allow_overtime ? "count" : "stop"}
+              onChange={(v) => onAllowOvertime(v === "count")}
+              options={[
+                { value: "stop", label: "TIME'S UP" },
+                { value: "count", label: "Overtime count" },
+              ]}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
