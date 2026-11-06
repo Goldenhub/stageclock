@@ -1,5 +1,11 @@
 name: Build StageClock
 
+# Pushes to main and pull requests only *check* the app (type-check, build,
+# lint, tests). Installers and the auto-update manifest are built and
+# uploaded only when a version tag (v1.2.3) is pushed — which is what
+# `npm run release:patch` does. That way one release = one build, and
+# ordinary pushes can never touch a published release.
+
 on:
   push:
     branches: [main]
@@ -8,10 +14,59 @@ on:
     branches: [main]
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  build:
+  check:
+    name: Check (type-check, build, lint, test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libxdo-dev libssl-dev \
+            libayatana-appindicator3-dev librsvg2-dev
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Type-check and build frontend
+        run: npm run build
+
+      - name: Clippy
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+
+      - name: Rust tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
+  release:
+    name: Release (${{ matrix.target }})
+    needs: check
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
       matrix:
@@ -28,10 +83,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The release is named after tauri.conf.json's version, and the updater
+      # compares against it, so the tag must match it exactly.
+      - name: Check tag matches app version
+        shell: bash
+        run: |
+          app_version=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          if [ "${GITHUB_REF_NAME}" != "v${app_version}" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} does not match tauri.conf.json version ${app_version}. Use npm run release:patch to bump and tag."
+            exit 1
+          fi
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: npm
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
@@ -42,11 +109,12 @@ jobs:
         uses: swatinem/rust-cache@v2
         with:
           workspaces: src-tauri -> target
+          key: ${{ matrix.target }}
 
       - name: Install frontend dependencies
         run: npm ci
 
-      - name: Build and create release
+      - name: Build and upload to draft release
         uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
