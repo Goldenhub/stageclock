@@ -1,6 +1,6 @@
 [package]
 name = "stageclock"
-version = "0.1.4"
+version = "0.1.5"
 description = "A lightweight cross-platform stage clock and event timer"
 authors = ["you"]
 edition = "2021"
