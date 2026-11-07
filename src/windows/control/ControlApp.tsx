@@ -2,7 +2,7 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
 import { ask } from "@tauri-apps/plugin-dialog";
-import { Settings, Smartphone, Zap, Cast, SkipForward, ArrowDown, ArrowUp, StickyNote } from "lucide-react";
+import { Settings, Smartphone, Zap, Cast, SkipForward, ArrowDown, ArrowUp, StickyNote, LifeBuoy, X } from "lucide-react";
 import { useTimer } from "../../hooks/useTimer";
 import { useSchedule } from "../../hooks/useSchedule";
 import { ControlBar } from "../../components/ControlBar";
@@ -40,12 +40,13 @@ type DialogState =
   | { kind: "remote" };
 
 export function ControlApp() {
-  const { state, start, pause, stop, reset, adjust, loadItem, setAllowOvertime } = useTimer();
+  const { state, ready, start, pause, stop, reset, adjust, loadItem, setAllowOvertime } = useTimer();
   const schedule = useSchedule();
   const [settings, setSettings] = useState<AppSettings>(loadSettings);
   const [dialog, setDialog] = useState<DialogState>({ kind: "none" });
   const [creatingSchedule, setCreatingSchedule] = useState(false);
   const [live, setLive] = useState(false);
+  const [recoveryNotice, setRecoveryNotice] = useState<string | null>(null);
 
   const activeSchedule = schedule.activeSchedule;
   const hasItem = state.active_item_id !== null;
@@ -64,6 +65,8 @@ export function ControlApp() {
   useEffect(() => {
     checkForUpdates();
     invoke<boolean>("is_display_visible").then(setLive).catch(() => {});
+    // Set when the last session was restored after a crash / restart.
+    invoke<string | null>("take_recovery_notice").then(setRecoveryNotice).catch(() => {});
   }, []);
 
   // Always keep the display window on the chosen monitor
@@ -76,7 +79,9 @@ export function ControlApp() {
   // Auto-advance: when a countdown reaches zero, load the next item (paused)
   const wasOvertime = useRef(false);
   useEffect(() => {
-    if (!settings.autoAdvance) {
+    // Ignore the placeholder state, or a timer restored already in overtime
+    // would look like it "just" hit zero and skip ahead on launch.
+    if (!ready || !settings.autoAdvance) {
       wasOvertime.current = state.overtime;
       return;
     }
@@ -92,7 +97,7 @@ export function ControlApp() {
         loadItem(nextItem.id, nextItem.duration, nextItem.label, nextItem.direction);
       }
     }
-  }, [state.overtime, state.active_item_id, state.direction, settings.autoAdvance, activeSchedule, loadItem]);
+  }, [ready, state.overtime, state.active_item_id, state.direction, settings.autoAdvance, activeSchedule, loadItem]);
 
   // ── Derived schedule info ─────────────────────────────────────────────────
   const items = activeSchedule?.items ?? [];
@@ -235,6 +240,21 @@ export function ControlApp() {
         </div>
       </header>
 
+      {recoveryNotice && (
+        <div className="flex shrink-0 items-center gap-3 border-b border-emerald-500/20 bg-emerald-500/[0.08] px-4 py-2.5 text-sm text-emerald-100">
+          <LifeBuoy size={16} className="shrink-0 text-emerald-400" />
+          <span className="flex-1">{recoveryNotice}</span>
+          <button
+            type="button"
+            onClick={() => setRecoveryNotice(null)}
+            className="rounded p-1 text-emerald-300/70 hover:bg-emerald-500/10 hover:text-emerald-100"
+            aria-label="Dismiss"
+          >
+            <X size={15} />
+          </button>
+        </div>
+      )}
+
       <div className="flex flex-1 overflow-hidden">
         <ScheduleSidebar
           schedule={schedule}
@@ -352,7 +372,7 @@ export function ControlApp() {
         <SettingsPanel settings={settings} onUpdate={setSettings} onClose={() => setDialog({ kind: "none" })} />
       )}
       {dialog.kind === "remote" && (
-        <RemotePanel settings={settings} onUpdate={setSettings} onClose={() => setDialog({ kind: "none" })} />
+        <RemotePanel onClose={() => setDialog({ kind: "none" })} />
       )}
     </div>
   );

@@ -43,64 +43,39 @@
       min-height: 100dvh;
     }
 
-    /* PIN screen */
-    #pin-screen {
+    /* Pairing screen (shown until the phone is paired) */
+    #pair-screen {
       flex: 1;
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      gap: 20px;
+      gap: 14px;
       padding: 32px;
-    }
-
-    #pin-screen h1 {
-      font-size: 1.5rem;
-      font-weight: 700;
-    }
-
-    #pin-screen p {
-      color: var(--muted);
-      font-size: 0.875rem;
-    }
-
-    #pin-input {
-      font-size: 2rem;
-      letter-spacing: 0.5em;
       text-align: center;
-      width: 12ch;
-      background: var(--surface);
-      border: 2px solid var(--border);
-      color: var(--text);
-      border-radius: 12px;
-      padding: 12px;
-      outline: none;
     }
 
-    #pin-input:focus {
-      border-color: var(--indigo);
+    #pair-screen img {
+      width: 64px;
+      height: 64px;
+      border-radius: 14px;
+      margin-bottom: 6px;
     }
 
-    #pin-error {
-      color: var(--red);
-      font-size: 0.875rem;
-      min-height: 1.25em;
-    }
-
-    #pin-btn {
-      width: 100%;
-      padding: 18px;
-      background: var(--indigo);
-      color: white;
-      border: none;
-      border-radius: 12px;
-      font-size: 1.1rem;
+    #pair-screen h1 {
+      font-size: 1.4rem;
       font-weight: 700;
-      cursor: pointer;
     }
 
-    #pin-btn:active {
-      opacity: 0.8;
+    #pair-screen p {
+      color: var(--muted);
+      font-size: 0.95rem;
+      line-height: 1.45;
+      max-width: 22rem;
+    }
+
+    #pair-screen p.error {
+      color: var(--amber);
     }
 
     /* Main remote */
@@ -451,12 +426,10 @@
 
 <body>
 
-  <div id="pin-screen">
-    <h1>&#9201; StageClock</h1>
-    <p>Enter the PIN to connect</p>
-    <input id="pin-input" type="number" inputmode="numeric" pattern="[0-9]*" placeholder="· · · ·" autocomplete="off" />
-    <div id="pin-error"></div>
-    <button id="pin-btn">Connect</button>
+  <div id="pair-screen">
+    <img src="/logo" alt="" />
+    <h1>StageClock Remote</h1>
+    <p id="pair-msg">On the StageClock computer, open <b>Phone remote</b> and scan the QR code with this phone's camera.</p>
   </div>
 
   <div id="remote">
@@ -517,10 +490,12 @@
   <script>
     (function () {
       'use strict';
-      var PIN_KEY = 'et_pin';
+      var TOKEN_KEY = 'stageclock_token';
       var ws = null;
       var reconnectDelay = 1000;
-      var currentPin = '';
+      var stopped = false; // set when the server refuses us; no reconnecting
+
+      function storage(fn) { try { return fn(); } catch (_) { return null; } }
 
       // ── helpers ────────────────────────────────────────────────────────────────
       function $(id) { return document.getElementById(id); }
@@ -566,43 +541,41 @@
         }
       }
 
-      // ── PIN screen ─────────────────────────────────────────────────────────────
-      function submitPin() {
-        haptic($('pin-btn'));
-        var pin = $('pin-input').value.trim();
-        if (!pin) return;
-        currentPin = pin;
-        sessionStorage.setItem(PIN_KEY, pin);
-        $('pin-error').textContent = '';
-        showRemote();
-        connect(pin);
-      }
-
+      // ── Pairing ────────────────────────────────────────────────────────────────
       function showRemote() {
-        $('pin-screen').style.display = 'none';
+        $('pair-screen').style.display = 'none';
         $('remote').style.display = 'flex';
       }
 
-      $('pin-btn').addEventListener('click', submitPin);
-      $('pin-input').addEventListener('keydown', function (e) {
-        if (e.key === 'Enter') submitPin();
-      });
+      function showPairing(message, isError) {
+        stopped = true;
+        if (ws) { try { ws.close(); } catch (_) { } }
+        $('remote').style.display = 'none';
+        $('pair-screen').style.display = 'flex';
+        var p = $('pair-msg');
+        p.innerHTML = message;
+        p.className = isError ? 'error' : '';
+      }
+
+      var SCAN_AGAIN = 'On the StageClock computer, open <b>Phone remote</b> and scan the QR code again.';
 
       // ── WebSocket ──────────────────────────────────────────────────────────────
-      function connect(pin) {
+      function connect(token) {
+        if (stopped) return;
         // Use the page's own host:port — the server may not be on 3000.
         var url = 'ws://' + window.location.host + '/ws';
-        try { ws = new WebSocket(url); } catch (e) { scheduleReconnect(pin); return; }
+        try { ws = new WebSocket(url); } catch (e) { scheduleReconnect(token); return; }
 
         ws.onopen = function () {
           reconnectDelay = 1000;
-          setStatus(true, 'Connected');
-          ws.send(JSON.stringify({ type: 'AUTH', pin: pin }));
+          setStatus(true, 'Connecting…');
+          ws.send(JSON.stringify({ type: 'AUTH', token: token }));
         };
 
         ws.onclose = function () {
+          if (stopped) return;
           setStatus(false, 'Reconnecting…');
-          scheduleReconnect(pin);
+          scheduleReconnect(token);
         };
 
         ws.onerror = function () {
@@ -617,10 +590,16 @@
                 setStatus(true, 'Connected ✓');
                 break;
               case 'AUTH_FAIL':
-                sessionStorage.removeItem(PIN_KEY);
-                $('pin-error').textContent = 'Incorrect PIN.';
-                $('remote').style.display = 'none';
-                $('pin-screen').style.display = 'flex';
+                storage(function () { localStorage.removeItem(TOKEN_KEY); });
+                showPairing('This phone is no longer paired. ' + SCAN_AGAIN, true);
+                break;
+              case 'REVOKED':
+                storage(function () { localStorage.removeItem(TOKEN_KEY); });
+                showPairing('The operator disconnected all phones. ' + SCAN_AGAIN, true);
+                break;
+              case 'LOCKED_OUT':
+                showPairing('Too many failed attempts from this device. Try again in ' +
+                  Math.ceil((msg.retry_after_s || 300) / 60) + ' minutes.', true);
                 break;
               case 'STATE':
                 updateDisplay(msg);
@@ -633,10 +612,10 @@
         };
       }
 
-      function scheduleReconnect(pin) {
+      function scheduleReconnect(token) {
         setTimeout(function () {
           reconnectDelay = Math.min(reconnectDelay * 1.5, 5000);
-          connect(pin);
+          connect(token);
         }, reconnectDelay);
       }
 
@@ -741,12 +720,18 @@
       $('btn-p5').addEventListener('click', function () { haptic(this); send({ type: 'ADJUST', delta: 300 }); });
       $('btn-p10').addEventListener('click', function () { haptic(this); send({ type: 'ADJUST', delta: 600 }); });
 
-      // ── Auto-connect if PIN saved ─────────────────────────────────────────────
-      var savedPin = sessionStorage.getItem(PIN_KEY);
-      if (savedPin) {
-        currentPin = savedPin;
+      // ── Start: take the pairing code from the QR link, or a saved one ────────
+      // The QR link is /mobile#k=<code>. The fragment never reaches the server
+      // in a request, and we strip it from the address bar after reading it.
+      var match = /[#&]k=([0-9a-f]{32})/i.exec(window.location.hash);
+      if (match) {
+        storage(function () { localStorage.setItem(TOKEN_KEY, match[1]); });
+        storage(function () { history.replaceState(null, '', window.location.pathname); });
+      }
+      var token = match ? match[1] : storage(function () { return localStorage.getItem(TOKEN_KEY); });
+      if (token) {
         showRemote();
-        connect(savedPin);
+        connect(token);
       }
 
       // ── Banner ────────────────────────────────────────────────────────────────

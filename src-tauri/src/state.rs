@@ -1,8 +1,8 @@
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ScheduleItem {
     pub id: String,
     pub label: String,
@@ -53,6 +53,45 @@ pub struct AppState {
     pub banner_expires_at: Option<Instant>,
     pub warning_seconds: u64,
     pub critical_seconds: u64,
+    /// Whether the stage window is showing, and on which monitor — restored
+    /// after a restart so the stage doesn't go blank.
+    pub display_live: bool,
+    pub display_monitor: Option<usize>,
+    /// Set once after a restart restored a timer; shown to the operator.
+    pub recovery_notice: Option<String>,
+}
+
+/// Wall-clock milliseconds since the Unix epoch.
+pub fn now_unix_ms() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+/// How long after the last save a running timer is still resumed as running.
+/// Covers a crash, an accidental quit or a reboot mid-service; anything
+/// longer (e.g. reopening the app days later) comes back paused instead.
+pub const RESUME_WINDOW_MS: i64 = 30 * 60 * 1000;
+
+/// What is written to disk so a restart can pick up where it left off.
+/// Uses wall-clock time, because `Instant` means nothing after a restart.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PersistedSession {
+    pub saved_at_ms: i64,
+    pub elapsed_ms: i64,
+    pub duration_ms: u64,
+    pub direction: String,
+    pub running: bool,
+    pub active_item_id: Option<String>,
+    pub label: Option<String>,
+    pub allow_overtime: bool,
+    pub schedule_items: Vec<ScheduleItem>,
+    pub schedule_name: String,
+    pub warning_seconds: u64,
+    pub critical_seconds: u64,
+    pub display_live: bool,
+    pub display_monitor: Option<usize>,
 }
 
 impl Default for AppState {
@@ -78,7 +117,84 @@ impl AppState {
             banner_expires_at: None,
             warning_seconds: 120,
             critical_seconds: 30,
+            display_live: false,
+            display_monitor: None,
+            recovery_notice: None,
         }
+    }
+
+    // ── Persistence ──────────────────────────────────────────────────────────
+
+    /// Capture everything needed to restore this session at `now_ms`.
+    pub fn snapshot(&self, now_ms: i64) -> PersistedSession {
+        PersistedSession {
+            saved_at_ms: now_ms,
+            elapsed_ms: self.current_elapsed_ms(),
+            duration_ms: self.duration_ms,
+            direction: self.direction.clone(),
+            running: self.running,
+            active_item_id: self.active_item_id.clone(),
+            label: self.label.clone(),
+            allow_overtime: self.allow_overtime,
+            schedule_items: self.schedule_items.clone(),
+            schedule_name: self.schedule_name.clone(),
+            warning_seconds: self.warning_seconds,
+            critical_seconds: self.critical_seconds,
+            display_live: self.display_live,
+            display_monitor: self.display_monitor,
+        }
+    }
+
+    /// Restore a saved session at `now_ms`. A timer that was running and was
+    /// saved within `RESUME_WINDOW_MS` keeps running, with the time that
+    /// passed while the app was down counted in. Older sessions come back
+    /// paused where they were. Returns true if the stage should be shown.
+    pub fn restore(&mut self, p: PersistedSession, now_ms: i64) -> bool {
+        let gap_ms = (now_ms - p.saved_at_ms).max(0);
+        let resume = p.running && gap_ms <= RESUME_WINDOW_MS;
+
+        self.duration_ms = p.duration_ms;
+        self.direction = p.direction;
+        self.active_item_id = p.active_item_id;
+        self.label = p.label;
+        self.allow_overtime = p.allow_overtime;
+        self.schedule_items = p.schedule_items;
+        self.schedule_name = p.schedule_name;
+        self.warning_seconds = p.warning_seconds;
+        self.critical_seconds = p.critical_seconds;
+        self.display_monitor = p.display_monitor;
+        self.banner_text = None;
+        self.banner_expires_at = None;
+
+        if resume {
+            self.elapsed_at_snapshot = if self.direction == "down" {
+                p.elapsed_ms - gap_ms
+            } else {
+                p.elapsed_ms + gap_ms
+            };
+            self.start_instant = Some(Instant::now());
+            self.running = true;
+        } else {
+            self.elapsed_at_snapshot = p.elapsed_ms;
+            self.start_instant = None;
+            self.running = false;
+        }
+
+        // Only bring the stage back for a live recovery, not days later.
+        let show_stage = p.display_live && gap_ms <= RESUME_WINDOW_MS;
+        self.display_live = show_stage;
+
+        if let Some(label) = &self.label {
+            let secs = gap_ms / 1000;
+            self.recovery_notice = Some(if resume {
+                format!("StageClock restarted. \"{label}\" kept running (it was closed for {secs} s).")
+            } else if p.running {
+                format!("\"{label}\" was running when StageClock closed. It has been restored, paused.")
+            } else {
+                format!("\"{label}\" has been restored from your last session.")
+            });
+        }
+        show_stage
     }
 
     pub fn current_elapsed_ms(&self) -> i64 {
@@ -344,6 +460,82 @@ mod tests {
         let mut s = countdown(120);
         s.update_active_item("b", "Other".into(), 600, None);
         assert_eq!(s.label.as_deref(), Some("Talk"));
+    }
+
+    #[test]
+    fn running_countdown_resumes_with_downtime_counted() {
+        let mut s = countdown(600);
+        s.start();
+        s.display_live = true;
+        s.display_monitor = Some(1);
+        let saved = s.snapshot(1_000_000);
+
+        let mut r = AppState::new();
+        let show = r.restore(saved, 1_000_000 + 8_000); // down for 8 s
+        assert!(show);
+        assert!(r.running);
+        let e = r.current_elapsed_ms();
+        assert!((591_900..=592_000).contains(&e), "elapsed {e}");
+        assert_eq!(r.display_monitor, Some(1));
+        assert!(r.recovery_notice.unwrap().contains("kept running"));
+    }
+
+    #[test]
+    fn running_count_up_resumes_forward() {
+        let mut s = AppState::new();
+        s.load_item("u".into(), 0, Some("Fellowship".into()), Some("up".into()));
+        s.elapsed_at_snapshot = 60_000;
+        s.start();
+        let saved = s.snapshot(0);
+        let mut r = AppState::new();
+        r.restore(saved, 5_000);
+        assert!(r.running);
+        assert!(r.current_elapsed_ms() >= 65_000);
+    }
+
+    #[test]
+    fn stale_session_comes_back_paused_and_stage_hidden() {
+        let mut s = countdown(600);
+        s.start();
+        s.display_live = true;
+        let saved = s.snapshot(0);
+        let mut r = AppState::new();
+        let show = r.restore(saved, RESUME_WINDOW_MS + 1);
+        assert!(!show);
+        assert!(!r.running);
+        assert_eq!(r.current_elapsed_ms(), 600_000);
+        assert!(r.recovery_notice.unwrap().contains("paused"));
+    }
+
+    #[test]
+    fn paused_session_restores_exact_value() {
+        let mut s = countdown(600);
+        s.elapsed_at_snapshot = 123_000;
+        let saved = s.snapshot(0);
+        let mut r = AppState::new();
+        r.restore(saved, 10_000);
+        assert!(!r.running);
+        assert_eq!(r.current_elapsed_ms(), 123_000);
+    }
+
+    #[test]
+    fn clock_moving_backwards_counts_as_no_gap() {
+        let mut s = countdown(600);
+        s.start();
+        let saved = s.snapshot(50_000);
+        let mut r = AppState::new();
+        r.restore(saved, 10_000); // system clock went back
+        assert!(r.running);
+        assert!(r.current_elapsed_ms() <= 600_000);
+        assert!(r.current_elapsed_ms() > 599_000);
+    }
+
+    #[test]
+    fn snapshot_round_trips_through_json() {
+        let s = countdown(300);
+        let p = s.snapshot(42);
+        let json = serde_json::to_string(&p).unwrap();
+        assert_eq!(serde_json::from_str::<PersistedSession>(&json).unwrap(), p);
     }
 
     #[test]

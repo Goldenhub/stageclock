@@ -6,16 +6,21 @@ import { DEFAULT_TIMER_STATE } from "../types";
 
 export function useTimer() {
   const [state, setState] = useState<TimerState>(DEFAULT_TIMER_STATE);
+  // False until the real state has arrived from Rust (the placeholder
+  // default must not be mistaken for "timer is at zero").
+  const [ready, setReady] = useState(false);
 
   useEffect(() => {
+    const receive = (s: TimerState) => {
+      setState(s);
+      setReady(true);
+    };
     // Fetch initial state
-    invoke<TimerState>("get_timer_state")
-      .then(setState)
-      .catch(console.error);
+    invoke<TimerState>("get_timer_state").then(receive).catch(console.error);
 
     // Listen for state updates from Rust
     const unlisten = listen<TimerState>("timer-state-updated", (event) => {
-      setState(event.payload);
+      receive(event.payload);
     });
 
     return () => {
@@ -49,5 +54,5 @@ export function useTimer() {
     [state.running, pause, start]
   );
 
-  return { state, start, pause, stop, reset, adjust, loadItem, setAllowOvertime, toggle };
+  return { state, ready, start, pause, stop, reset, adjust, loadItem, setAllowOvertime, toggle };
 }

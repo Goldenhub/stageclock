@@ -1,7 +1,7 @@
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
-        State,
+        ConnectInfo, State,
     },
     http::header,
     response::{Html, IntoResponse},
@@ -9,10 +9,17 @@ use axum::{
     Router,
 };
 use serde::Deserialize;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tokio::sync::broadcast;
 
+use crate::persist::Persistence;
+use crate::remote_auth::{AuthResult, RemoteAuth};
 use crate::state::{self, AppState, SharedState};
+
+/// A connection that hasn't paired within this time is dropped.
+const AUTH_TIMEOUT: Duration = Duration::from_secs(10);
 
 // Mobile HTML is embedded at compile time.
 const MOBILE_HTML: &str = include_str!("../../src/mobile/index.html");
@@ -24,7 +31,8 @@ pub const PORT_CANDIDATES: std::ops::RangeInclusive<u16> = 3000..=3010;
 pub struct ServerState {
     pub timer_state: SharedState,
     pub broadcast_tx: broadcast::Sender<String>,
-    pub pin: Arc<tokio::sync::Mutex<String>>,
+    pub auth: Arc<RemoteAuth>,
+    pub persistence: Persistence,
 }
 
 pub type SharedServerState = Arc<ServerState>;
@@ -33,7 +41,7 @@ pub type SharedServerState = Arc<ServerState>;
 struct WsCommand {
     #[serde(rename = "type")]
     cmd_type: String,
-    pin: Option<String>,
+    token: Option<String>,
     delta: Option<i64>,
     id: Option<String>,
     duration: Option<u64>,
@@ -104,17 +112,8 @@ pub fn bind_listener() -> Option<std::net::TcpListener> {
     None
 }
 
-pub async fn start_server(
-    listener: std::net::TcpListener,
-    timer_state: SharedState,
-    broadcast_tx: broadcast::Sender<String>,
-    pin: Arc<tokio::sync::Mutex<String>>,
-) {
-    let server_state = Arc::new(ServerState {
-        timer_state,
-        broadcast_tx,
-        pin,
-    });
+pub async fn start_server(listener: std::net::TcpListener, server_state: ServerState) {
+    let server_state = Arc::new(server_state);
 
     let app = Router::new()
         .route("/mobile", get(mobile_handler))
@@ -134,7 +133,9 @@ pub async fn start_server(
         println!("Remote server listening on http://{addr}");
     }
 
-    if let Err(e) = axum::serve(listener, app).await {
+    // Connect info gives each socket its peer address, for the lockout.
+    let service = app.into_make_service_with_connect_info::<SocketAddr>();
+    if let Err(e) = axum::serve(listener, service).await {
         eprintln!("Server error: {e}");
     }
 }
@@ -152,14 +153,54 @@ async fn logo_handler() -> impl IntoResponse {
 
 async fn ws_handler(
     ws: WebSocketUpgrade,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     State(state): State<SharedServerState>,
 ) -> impl IntoResponse {
-    ws.on_upgrade(|socket| handle_socket(socket, state))
+    ws.on_upgrade(move |socket| handle_socket(socket, state, addr.ip()))
 }
 
-async fn handle_socket(mut socket: WebSocket, state: SharedServerState) {
-    let mut authenticated = false;
+fn json_msg(v: serde_json::Value) -> Message {
+    Message::Text(v.to_string())
+}
+
+async fn handle_socket(mut socket: WebSocket, state: SharedServerState, ip: IpAddr) {
+    // ── 1. Pairing: the first message must carry the right token ───────────
+    let first = tokio::time::timeout(AUTH_TIMEOUT, socket.recv()).await;
+    let token = match first {
+        Ok(Some(Ok(Message::Text(text)))) => serde_json::from_str::<WsCommand>(&text)
+            .ok()
+            .filter(|c| c.cmd_type == "AUTH")
+            .and_then(|c| c.token),
+        _ => None,
+    };
+    let result = match &token {
+        Some(t) => state.auth.check(ip, t, Instant::now()),
+        None => AuthResult::Denied,
+    };
+    match result {
+        AuthResult::Ok => {}
+        AuthResult::Denied => {
+            let _ = socket.send(json_msg(serde_json::json!({"type": "AUTH_FAIL"}))).await;
+            return;
+        }
+        AuthResult::LockedOut => {
+            let _ = socket
+                .send(json_msg(serde_json::json!({"type": "LOCKED_OUT", "retry_after_s": crate::remote_auth::LOCKOUT.as_secs()})))
+                .await;
+            return;
+        }
+    }
+
+    // ── 2. Paired: send current state, then relay commands and broadcasts ──
+    let _guard = state.auth.track_connection();
+    let mut revoked = state.auth.subscribe_revocations();
     let mut rx = state.broadcast_tx.subscribe();
+
+    let _ = socket.send(json_msg(serde_json::json!({"type": "AUTH_OK"}))).await;
+    let msgs = state_messages(&state::lock(&state.timer_state));
+    for json in msgs {
+        let _ = socket.send(Message::Text(json)).await;
+    }
 
     loop {
         tokio::select! {
@@ -167,44 +208,29 @@ async fn handle_socket(mut socket: WebSocket, state: SharedServerState) {
                 match msg {
                     Some(Ok(Message::Text(text))) => {
                         if let Ok(cmd) = serde_json::from_str::<WsCommand>(&text) {
-                            match cmd.cmd_type.as_str() {
-                                "AUTH" => {
-                                    let correct_pin = state.pin.lock().await.clone();
-                                    if cmd.pin.as_deref() == Some(&correct_pin) {
-                                        authenticated = true;
-                                        let resp = serde_json::json!({"type": "AUTH_OK"}).to_string();
-                                        let _ = socket.send(Message::Text(resp)).await;
-                                        // Build messages, then drop the guard before awaiting.
-                                        let msgs = state_messages(&state::lock(&state.timer_state));
-                                        for json in msgs {
-                                            let _ = socket.send(Message::Text(json)).await;
-                                        }
-                                    } else {
-                                        let resp = serde_json::json!({"type": "AUTH_FAIL"}).to_string();
-                                        let _ = socket.send(Message::Text(resp)).await;
-                                    }
-                                }
-                                _ if authenticated => {
-                                    handle_ws_command(&cmd, &state);
-                                }
-                                _ => {}
-                            }
+                            handle_ws_command(&cmd, &state);
                         }
                     }
-                    Some(Ok(Message::Close(_))) | None => break,
+                    Some(Ok(Message::Close(_))) | None | Some(Err(_)) => break,
                     _ => {}
                 }
             }
             broadcast = rx.recv() => {
                 match broadcast {
                     Ok(msg) => {
-                        if authenticated && socket.send(Message::Text(msg)).await.is_err() {
+                        if socket.send(Message::Text(msg)).await.is_err() {
                             break;
                         }
                     }
                     Err(broadcast::error::RecvError::Lagged(_)) => continue,
                     Err(_) => break,
                 }
+            }
+            // The operator pressed "Disconnect all phones".
+            _ = revoked.changed() => {
+                let _ = socket.send(json_msg(serde_json::json!({"type": "REVOKED"}))).await;
+                let _ = socket.send(Message::Close(None)).await;
+                break;
             }
         }
     }
@@ -241,4 +267,5 @@ fn handle_ws_command(cmd: &WsCommand, state: &SharedServerState) {
     }
 
     broadcast_state(&s, &state.broadcast_tx);
+    state.persistence.save(&s);
 }
